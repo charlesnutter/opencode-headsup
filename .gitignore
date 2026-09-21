@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+dist/
+
+# Agent-facing material — kept locally, not published while it settles
+AGENTS.md
+CLAUDE.md
+.agents/
