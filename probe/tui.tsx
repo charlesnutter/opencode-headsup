@@ -25,6 +25,16 @@ function log(tag: string, payload?: unknown): void {
   }
 }
 
+/**
+ * Field names whose values must never reach the log. The probe writes to a
+ * temp file that gets shared around; a config-supplied API key landing in it
+ * is a real leak, not a hypothetical one.
+ */
+function secret(key: string): boolean {
+  const k = key.toLowerCase()
+  return k.includes("key") || k.includes("token") || k.includes("secret") || k.includes("password")
+}
+
 /** Shallow, bounded description — never dump a whole message tree. */
 function safe(v: unknown, depth = 0): string {
   if (v === null) return "null"
@@ -39,7 +49,9 @@ function safe(v: unknown, depth = 0): string {
   if (typeof v === "object") {
     if (depth >= 2) return `{${Object.keys(v as object).join(",")}}`
     const e = Object.entries(v as Record<string, unknown>).slice(0, 12)
-    return `{${e.map(([k, val]) => `${k}: ${safe(val, depth + 1)}`).join(", ")}}`
+    return `{${e
+      .map(([k, val]) => `${k}: ${secret(k) ? "<redacted>" : safe(val, depth + 1)}`)
+      .join(", ")}}`
   }
   return String(v)
 }
