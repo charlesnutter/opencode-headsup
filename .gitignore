@@ -7,4 +7,3 @@ dist/
 AGENTS.md
 CLAUDE.md
 .agents/
-package-lock.json

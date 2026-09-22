@@ -1,0 +1,35 @@
+name: test
+
+# Runs `npm test` on a clean machine. That matters more here than it did on
+# the v1 line: every dependency is pinned to one exact OpenCode 2 beta build
+# (0.0.0-beta-19271), and `npm ci` installs exactly what package-lock.json
+# pins — so this genuinely re-tests the declared build on every push, not
+# just on whichever machine last ran `npm install`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # test/*.mjs run under bun, per package.json's own test script.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - run: npm ci
+
+      - run: npm test
+
+      # The v2 blocker that only a clean room catches: a published tarball
+      # whose runtime imports do not resolve.
+      - run: npm pack --dry-run
