@@ -168,28 +168,10 @@ test("the per-turn cost is used, never a running session total", () => {
   assert.ok(!out.includes("0.0656"), "a session total must not leak in")
 })
 
-// ---- Display: each figure can be hidden independently -----------------------
-
-test("ttft hides on request but the rate survives", () => {
-  const out = universalLine("mtplx", "m", metered, { firstAt: 1500, lastAt: 2662 },
-    { ...DEFAULT_DISPLAY, ttft: false })
-  assert.ok(!out.includes("ttft"), out)
-  assert.ok(out.includes("tok/s"), "hiding ttft must not hide the rate too")
-})
-
-test("cost hides on request; cache is independent of it", () => {
-  const out = universalLine("opencode-go", "m", metered, { firstAt: 1500, lastAt: 2662 },
-    { ...DEFAULT_DISPLAY, cost: false })
-  assert.ok(!out.includes("$"), out)
-  assert.ok(out.includes("2048 cached"), "cost and cache are independent toggles")
-})
-
-test("cache hides on request; cost is independent of it", () => {
-  const out = universalLine("opencode-go", "m", metered, { firstAt: 1500, lastAt: 2662 },
-    { ...DEFAULT_DISPLAY, cache: false })
-  assert.ok(!out.includes("cached"), out)
-  assert.ok(out.includes("$0.0006"), out)
-})
+// ---- Display: context is the only real preference ----------------------------
+// ttft, cost and cache are not configurable — each already shows exactly
+// when its own figure exists and hides exactly when it does not, covered by
+// the absent/present tests above. There is nothing to toggle there.
 
 test("context is off by default and opt-in only", () => {
   const withLimit = universalLine("llamacpp", "m", metered, { firstAt: 1500, lastAt: 2662 },

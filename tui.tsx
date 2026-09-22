@@ -96,11 +96,11 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
   const str = (v: unknown, envKey: string, fallback: string): string =>
     typeof v === "string" && v ? v : process.env[envKey] || fallback
   const trim = (s: string): string => s.replace(/\/+$/, "")
-  // Each defaults to matching current behaviour, per-figure and independent:
-  // hiding cost must not hide cache, hiding ttft must not hide the rate
-  // beside it. `context` inverts the pattern — it defaults OFF, since it is
-  // this plugin's own arithmetic sitting next to a host figure it cannot see
-  // the formula for. See Display's own doc comment in universal.ts.
+  // Only one figure is configurable. Everything else already shows exactly
+  // when its data exists and hides exactly when it does not, which is not a
+  // preference — there is nothing to choose between. `showContext` is real
+  // config, not a display preference, and defaults off; see Display's own
+  // doc comment in universal.ts.
   const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean" ? v : fallback)
   return {
     mtplxUrl: str(options["mtplxMetricsUrl"], "MTPLX_METRICS_URL", "http://127.0.0.1:8000/metrics"),
@@ -118,9 +118,6 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
     mlxServeBase: trim(str(options["mlxServeBaseUrl"], "MLXSERVE_BASE_URL", "http://127.0.0.1:8095")),
     mlxServeKey: str(options["mlxServeApiKey"], "MLX_API_KEY", ""),
     display: {
-      ttft: bool(options["showTtft"], DEFAULT_DISPLAY.ttft),
-      cost: bool(options["showCost"], DEFAULT_DISPLAY.cost),
-      cache: bool(options["showCache"], DEFAULT_DISPLAY.cache),
       context: bool(options["showContext"], DEFAULT_DISPLAY.context),
     },
   }
@@ -517,12 +514,20 @@ export default Plugin.define({
                 {
                   id: "headsup.panel",
                   title: "Show Inference History",
-                  description: "Open the per-turn telemetry drill-down",
+                  description: "Open or close the per-turn telemetry drill-down",
                   group: "opencode-headsup",
                   bind: "ctrl+shift+h",
                   palette: true,
                   run: () => {
-                    ctx.ui.panel.open(PANEL_NAME)
+                    // A snapshot read at the moment the command runs, not a
+                    // reactive one -- this decides once whether to open or
+                    // close, it does not need to re-run when the panel state
+                    // changes for some other reason.
+                    if (ctx.ui.panel.current()?.name === PANEL_NAME) {
+                      ctx.ui.panel.close()
+                    } else {
+                      ctx.ui.panel.open(PANEL_NAME)
+                    }
                   },
                 },
               ],
@@ -533,8 +538,13 @@ export default Plugin.define({
             // set, an explicit requestRender, and an onCleanup to avoid
             // accumulating a dead listener per mount (v1 audit C2) -- the
             // host owns all of that here.
+            // selectable defaults to true on every Renderable, so a plain
+            // click was starting a text selection (visible as the inverted
+            // highlight) instead of just toggling. This is a footer we
+            // render, not a passage a user would want to copy, so turning
+            // selection off is the right default rather than a workaround.
             return (
-              <text onMouseDown={() => toggleCollapsed()}>
+              <text selectable={false} onMouseDown={() => toggleCollapsed()}>
                 {ui.collapsed ? formatCollapsedLine(history.turns[0]) : panel.text}
               </text>
             )

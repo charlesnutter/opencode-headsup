@@ -74,31 +74,35 @@ export function turnRate(
  * behaviour except `context`, which defaults off — see its own doc comment
  * for why.
  */
+/**
+ * The one thing about this panel that is genuinely a preference rather than
+ * a fact about the data. TTFT, cost and cache are already shown exactly
+ * when the underlying figure exists and hidden exactly when it does not —
+ * that is not a setting to expose, there is nothing to prefer, only data
+ * that is there or is not.
+ *
+ * Context is different in kind, which is why it is the only toggle. It is
+ * an opt-in, our-own-arithmetic figure: `tokens.input / limit.context` from
+ * the model's own declared limit (verified to exist — Phase 0, P5). Off by
+ * default for a reason distinct from a normal preference: OpenCode's own
+ * sidebar already shows a context percentage, computed from data and a
+ * formula this plugin cannot see. For a built-in provider that is
+ * presumably measured; for a custom OpenAI-compatible one (llama.cpp,
+ * vLLM, ...) the limit is whatever the user wrote in their own
+ * `opencode.json`, so it is config, not a measurement, and this figure is
+ * only ever as trustworthy as that file.
+ *
+ * This is therefore explicitly NOT a claim of agreement with the host's
+ * own percentage, and is labelled `prompt/limit` rather than `context used`
+ * so it is not mistaken for one. Whether the two actually agree has not
+ * been checked against a live host figure; that is the reason this defaults
+ * off, and it stays off until someone wants to revisit it.
+ */
 export interface Display {
-  ttft: boolean
-  cost: boolean
-  cache: boolean
-  /**
-   * An opt-in, our-own-arithmetic context-usage figure: `tokens.input /
-   * limit.context` from the model's own declared limit (verified to exist —
-   * Phase 0, P5). Off by default for a reason distinct from every other
-   * toggle here: OpenCode's own sidebar already shows a context percentage,
-   * computed from data and a formula this plugin cannot see. For a built-in
-   * provider that is presumably measured; for a custom OpenAI-compatible one
-   * (llama.cpp, vLLM, ...) the limit is whatever the user wrote in their own
-   * `opencode.json`, so it is config, not a measurement, and this figure is
-   * only ever as trustworthy as that file.
-   *
-   * This is therefore explicitly NOT a claim of agreement with the host's
-   * own percentage, and is labelled `prompt/limit` rather than `context used`
-   * so it is not mistaken for one. Whether the two actually agree has not
-   * been checked against a live host figure; it is the reason this defaults
-   * off rather than on.
-   */
   context: boolean
 }
 
-export const DEFAULT_DISPLAY: Display = { ttft: true, cost: true, cache: true, context: false }
+export const DEFAULT_DISPLAY: Display = { context: false }
 
 export function universalLine(
   provider: string,
@@ -129,7 +133,7 @@ export function universalLine(
   // long wait those differ ~10x, so letting it pass as a decode rate would be
   // wrong rather than merely terse.
   const overall = rateWindow === "whole" ? " overall" : ""
-  const ttftLabel = display.ttft && ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""
+  const ttftLabel = ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""
   const rate =
     decodeTokS !== undefined
       ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}`
@@ -149,9 +153,9 @@ export function universalLine(
   // Both are omitted entirely when absent or zero: a free model showing
   // "$0.00" and a cold prompt showing "0 cached" are the same absent-is-not-
   // zero mistake the counters already avoid.
-  const cost = display.cost ? money(info?.cost) : ""
+  const cost = money(info?.cost)
   const cacheRead = info?.tokens?.cache?.read ?? 0
-  const cacheLabel = display.cache && cacheRead > 0 ? `${ni(cacheRead)} cached` : ""
+  const cacheLabel = cacheRead > 0 ? `${ni(cacheRead)} cached` : ""
   const extras = [cost, cacheLabel].filter(Boolean).join("  ")
 
   // Opt-in only (see Display.context). `prompt/limit`, never `context used`
