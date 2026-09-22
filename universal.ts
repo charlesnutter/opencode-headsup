@@ -69,11 +69,44 @@ export function turnRate(
   return { decodeTokS, ttft, total, rateWindow }
 }
 
+/**
+ * What the panel shows and hides. Every field defaults to matching current
+ * behaviour except `context`, which defaults off — see its own doc comment
+ * for why.
+ */
+export interface Display {
+  ttft: boolean
+  cost: boolean
+  cache: boolean
+  /**
+   * An opt-in, our-own-arithmetic context-usage figure: `tokens.input /
+   * limit.context` from the model's own declared limit (verified to exist —
+   * Phase 0, P5). Off by default for a reason distinct from every other
+   * toggle here: OpenCode's own sidebar already shows a context percentage,
+   * computed from data and a formula this plugin cannot see. For a built-in
+   * provider that is presumably measured; for a custom OpenAI-compatible one
+   * (llama.cpp, vLLM, ...) the limit is whatever the user wrote in their own
+   * `opencode.json`, so it is config, not a measurement, and this figure is
+   * only ever as trustworthy as that file.
+   *
+   * This is therefore explicitly NOT a claim of agreement with the host's
+   * own percentage, and is labelled `prompt/limit` rather than `context used`
+   * so it is not mistaken for one. Whether the two actually agree has not
+   * been checked against a live host figure; it is the reason this defaults
+   * off rather than on.
+   */
+  context: boolean
+}
+
+export const DEFAULT_DISPLAY: Display = { ttft: true, cost: true, cache: true, context: false }
+
 export function universalLine(
   provider: string,
   model: string,
   info: SessionMessageAssistant | undefined,
-  turn?: Turn
+  turn?: Turn,
+  display: Display = DEFAULT_DISPLAY,
+  contextLimit?: number
 ): string {
   const out: number = info?.tokens?.output ?? 0
   const reason: number = info?.tokens?.reasoning ?? 0
@@ -96,12 +129,11 @@ export function universalLine(
   // long wait those differ ~10x, so letting it pass as a decode rate would be
   // wrong rather than merely terse.
   const overall = rateWindow === "whole" ? " overall" : ""
+  const ttftLabel = display.ttft && ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""
   const rate =
     decodeTokS !== undefined
-      ? `${nn(decodeTokS)} tok/s${overall}${ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""}`
-      : ttft !== undefined
-        ? `ttft ${nn(ttft, 2)}s`
-        : ""
+      ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}`
+      : ttftLabel.trim()
   // OpenCode's output count excludes reasoning, so the topline adds them back.
   const totals = `${tokensLabel(generated, reason)}${total !== undefined ? `  ${nn(total, 2)}s` : ""}`
 
@@ -117,10 +149,20 @@ export function universalLine(
   // Both are omitted entirely when absent or zero: a free model showing
   // "$0.00" and a cold prompt showing "0 cached" are the same absent-is-not-
   // zero mistake the counters already avoid.
-  const cost = money(info?.cost)
+  const cost = display.cost ? money(info?.cost) : ""
   const cacheRead = info?.tokens?.cache?.read ?? 0
-  const extras = [cost, cacheRead > 0 ? `${ni(cacheRead)} cached` : ""].filter(Boolean).join("  ")
+  const cacheLabel = display.cache && cacheRead > 0 ? `${ni(cacheRead)} cached` : ""
+  const extras = [cost, cacheLabel].filter(Boolean).join("  ")
 
-  return [`${provider}  ${short(model)}`, rate, totals, extras].filter(Boolean).join("\n")
+  // Opt-in only (see Display.context). `prompt/limit`, never `context used`
+  // or a bare percentage — the wording itself is the caveat that this may
+  // not agree with the host's own figure, which uses data and a formula
+  // this plugin cannot see.
+  const context =
+    display.context && contextLimit !== undefined && contextLimit > 0
+      ? `${ni((info?.tokens?.input ?? 0) / contextLimit * 100)}% prompt/limit`
+      : ""
+
+  return [`${provider}  ${short(model)}`, rate, totals, extras, context].filter(Boolean).join("\n")
 }
 

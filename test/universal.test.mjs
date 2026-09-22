@@ -8,7 +8,7 @@
 // counts never disagreed — only the rate's numerator did.
 // Run with: bun test/universal.test.mjs
 import { strict as assert } from "node:assert"
-import { turnRate, universalLine } from "../universal.ts"
+import { turnRate, universalLine, DEFAULT_DISPLAY } from "../universal.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -166,6 +166,46 @@ test("the per-turn cost is used, never a running session total", () => {
   const out = universalLine("opencode-go", "m", { ...metered, cost: 0.06499 }, { firstAt: 1500, lastAt: 2662 })
   assert.ok(out.includes("$0.065"), out)
   assert.ok(!out.includes("0.0656"), "a session total must not leak in")
+})
+
+// ---- Display: each figure can be hidden independently -----------------------
+
+test("ttft hides on request but the rate survives", () => {
+  const out = universalLine("mtplx", "m", metered, { firstAt: 1500, lastAt: 2662 },
+    { ...DEFAULT_DISPLAY, ttft: false })
+  assert.ok(!out.includes("ttft"), out)
+  assert.ok(out.includes("tok/s"), "hiding ttft must not hide the rate too")
+})
+
+test("cost hides on request; cache is independent of it", () => {
+  const out = universalLine("opencode-go", "m", metered, { firstAt: 1500, lastAt: 2662 },
+    { ...DEFAULT_DISPLAY, cost: false })
+  assert.ok(!out.includes("$"), out)
+  assert.ok(out.includes("2048 cached"), "cost and cache are independent toggles")
+})
+
+test("cache hides on request; cost is independent of it", () => {
+  const out = universalLine("opencode-go", "m", metered, { firstAt: 1500, lastAt: 2662 },
+    { ...DEFAULT_DISPLAY, cache: false })
+  assert.ok(!out.includes("cached"), out)
+  assert.ok(out.includes("$0.0006"), out)
+})
+
+test("context is off by default and opt-in only", () => {
+  const withLimit = universalLine("llamacpp", "m", metered, { firstAt: 1500, lastAt: 2662 },
+    DEFAULT_DISPLAY, 32768)
+  assert.ok(!withLimit.includes("limit"), "default Display must not show it even with a limit available")
+
+  const optedIn = universalLine("llamacpp", "m", metered, { firstAt: 1500, lastAt: 2662 },
+    { ...DEFAULT_DISPLAY, context: true }, 32768)
+  // 4277 input / 32768 limit
+  assert.ok(optedIn.includes("13% prompt/limit"), optedIn)
+})
+
+test("context needs both the toggle AND a limit to show anything", () => {
+  const noLimit = universalLine("llamacpp", "m", metered, { firstAt: 1500, lastAt: 2662 },
+    { ...DEFAULT_DISPLAY, context: true }, undefined)
+  assert.ok(!noLimit.includes("limit"), "opting in with no known limit shows nothing, not 0%")
 })
 
 console.log(`\n${passed} passed`)

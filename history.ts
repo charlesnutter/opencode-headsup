@@ -131,6 +131,22 @@ export function formatRow(t: TurnRecord, modelWidth = 18): string {
 }
 
 /**
+ * The collapsed sidebar line. One glance figure plus an affordance, not
+ * nothing — collapsing to bare "view metrics" with no number defeats the
+ * point of a glanceable panel. Derived from the most recent recorded turn
+ * rather than from whatever string the caller last rendered, so this stays
+ * correct even if the panel's own format changes.
+ */
+export function formatCollapsedLine(latest: TurnRecord | undefined): string {
+  if (!latest) return "▸ view metrics"
+  const rate =
+    latest.rate !== undefined
+      ? `${nn(latest.rate)} tok/s${latest.rateWindow === "whole" ? " overall" : ""}`
+      : ""
+  return ["▸ view metrics", rate].filter(Boolean).join("  ·  ")
+}
+
+/**
  * The whole panel body: a summary, then the rows.
  *
  * `*` marks a row whose figures came from the serving engine's own metrics

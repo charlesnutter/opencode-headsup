@@ -29,8 +29,8 @@ import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
 import type { HttpOptions } from "./http"
-import { universalLine, turnRate, type Turn } from "./universal"
-import { record, formatHistory, type History, type TurnRecord } from "./history"
+import { universalLine, turnRate, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
+import { record, formatHistory, formatCollapsedLine, type History, type TurnRecord } from "./history"
 
 import { fetchMtplxLatest, formatMtplxLine } from "./adapters/mtplx"
 import { fetchOmlxSample, formatOmlxLine, type OmlxSample } from "./adapters/omlx"
@@ -78,6 +78,7 @@ interface Config {
   koboldBase: string
   mlxServeBase: string
   mlxServeKey: string
+  display: Display
 }
 
 const HUD_DEBUG = !!process.env.OPENCODE_HUD_DEBUG
@@ -95,6 +96,12 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
   const str = (v: unknown, envKey: string, fallback: string): string =>
     typeof v === "string" && v ? v : process.env[envKey] || fallback
   const trim = (s: string): string => s.replace(/\/+$/, "")
+  // Each defaults to matching current behaviour, per-figure and independent:
+  // hiding cost must not hide cache, hiding ttft must not hide the rate
+  // beside it. `context` inverts the pattern — it defaults OFF, since it is
+  // this plugin's own arithmetic sitting next to a host figure it cannot see
+  // the formula for. See Display's own doc comment in universal.ts.
+  const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean" ? v : fallback)
   return {
     mtplxUrl: str(options["mtplxMetricsUrl"], "MTPLX_METRICS_URL", "http://127.0.0.1:8000/metrics"),
     omlxBase: trim(str(options["omlxBaseUrl"], "OMLX_BASE_URL", "http://127.0.0.1:8099")),
@@ -110,6 +117,12 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
     koboldBase: trim(str(options["koboldcppBaseUrl"], "KOBOLDCPP_BASE_URL", "http://127.0.0.1:5001")),
     mlxServeBase: trim(str(options["mlxServeBaseUrl"], "MLXSERVE_BASE_URL", "http://127.0.0.1:8095")),
     mlxServeKey: str(options["mlxServeApiKey"], "MLX_API_KEY", ""),
+    display: {
+      ttft: bool(options["showTtft"], DEFAULT_DISPLAY.ttft),
+      cost: bool(options["showCost"], DEFAULT_DISPLAY.cost),
+      cache: bool(options["showCache"], DEFAULT_DISPLAY.cache),
+      context: bool(options["showContext"], DEFAULT_DISPLAY.context),
+    },
   }
 }
 
@@ -141,6 +154,11 @@ interface Panel {
   text: string
 }
 
+/** Durable UI preference, independent of any one turn. */
+interface UiState {
+  collapsed: boolean
+}
+
 // ---- entry ------------------------------------------------------------------
 
 /** Identifies this plugin's panel among any others contributed to the slot. */
@@ -165,6 +183,16 @@ export default Plugin.define({
     const [history, setHistory] = ctx.storage.store<History>("history", {
       initial: { turns: [] },
     })
+    // The collapse preference. Durable like history, not ephemeral like the
+    // baselines: a user who collapses the footer almost certainly wants that
+    // to stick across restarts, the same way they would expect a sidebar
+    // section's collapsed state to persist in any other tool.
+    const [ui, setUi] = ctx.storage.store<UiState>("ui", { initial: { collapsed: false } })
+    const toggleCollapsed = (): void => {
+      setUi((d) => {
+        d.collapsed = !d.collapsed
+      }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
+    }
 
     const show = (text: string): void => {
       setPanel((d) => {
@@ -318,6 +346,21 @@ export default Plugin.define({
       }
     }
 
+    // ---- context limit (opt-in Display.context only) ------------------------
+    // ModelInfo.limit.context exists (Phase 0, P5) but is not indexed by the
+    // host for us, so this is a linear scan over whatever models are synced.
+    // Absent entirely until the first sync, and absent per-model for a
+    // provider block that declares no limit -- both real, both mean "no
+    // figure" rather than a guessed one.
+    function contextLimitFor(providerID: string, modelID: string): number | undefined {
+      const models = ctx.data.location.model.list()
+      if (!models) return undefined
+      for (const m of models) {
+        if (m.providerID === providerID && m.id === modelID) return m.limit?.context
+      }
+      return undefined
+    }
+
     // ---- turn completion ----------------------------------------------------
 
     let lastKey = ""
@@ -365,7 +408,16 @@ export default Plugin.define({
         dbg(`${provider} adapter threw: ${err.name}: ${err.message}\n${err.stack ?? ""}`)
       }
       const enriched = line !== null
-      if (!line) line = universalLine(provider, model, info, turn)
+      if (!line) {
+        line = universalLine(
+          provider,
+          model,
+          info,
+          turn,
+          cfg.display,
+          cfg.display.context ? contextLimitFor(provider, model) : undefined
+        )
+      }
 
       // Keep the turn for the drill-down. `source` is the epistemics: an
       // engine-measured rate and one derived from OpenCode's stream marks are
@@ -435,12 +487,58 @@ export default Plugin.define({
       off.push(
         ctx.ui.slot({
           append: "sidebar.footer",
-          // Reading `panel.text` inside render makes this reactive: a write
-          // re-renders the slot. v1 needed a hand-rolled listener set and an
-          // explicit requestRender, plus an onCleanup to avoid accumulating a
-          // dead listener per mount (v1 audit C2). The host owns all of that
-          // here, so that whole class of bug is gone rather than handled.
-          render: () => <text>{panel.text}</text>,
+          // A real component, not a bare closure returning JSX: it needs a
+          // Solid reactive owner to register the keymap layer with, per that
+          // API's own doc comment ("owned by the calling component"). Called
+          // once at mount -- Solid component bodies run once; reactivity
+          // comes from reading signals inside JSX or an effect, not from
+          // re-invoking the function -- so this registers the layer once and
+          // the host disposes it automatically when the slot unmounts.
+          //
+          // NOT yet live-verified. Reasoned from the API's own documentation,
+          // same as everything else that was true until a live run said
+          // otherwise (P1's ttft fix, Bug 1/2 in the tok/s episode). Confirm
+          // the binding actually appears and survives a slot unmount before
+          // treating this as settled.
+          render: () => {
+            ctx.keymap.layer(() => ({
+              commands: [
+                {
+                  id: "headsup.toggle",
+                  title: "Toggle Engine Telemetry",
+                  description: "Collapse or expand the inference telemetry line in the sidebar",
+                  group: "opencode-headsup",
+                  bind: "ctrl+shift+m",
+                  palette: true,
+                  run: () => {
+                    toggleCollapsed()
+                  },
+                },
+                {
+                  id: "headsup.panel",
+                  title: "Show Inference History",
+                  description: "Open the per-turn telemetry drill-down",
+                  group: "opencode-headsup",
+                  bind: "ctrl+shift+h",
+                  palette: true,
+                  run: () => {
+                    ctx.ui.panel.open(PANEL_NAME)
+                  },
+                },
+              ],
+            }))
+            // Reading `panel.text`/`ui.collapsed`/`history.turns` here, not
+            // captured outside, is what makes this reactive: a write to any
+            // of them re-renders the slot. v1 needed a hand-rolled listener
+            // set, an explicit requestRender, and an onCleanup to avoid
+            // accumulating a dead listener per mount (v1 audit C2) -- the
+            // host owns all of that here.
+            return (
+              <text onMouseDown={() => toggleCollapsed()}>
+                {ui.collapsed ? formatCollapsedLine(history.turns[0]) : panel.text}
+              </text>
+            )
+          },
         })
       )
     } catch (e: unknown) {

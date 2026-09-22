@@ -6,7 +6,7 @@
 // that.
 // Run with: bun test/history.test.mjs
 import { strict as assert } from "node:assert"
-import { record, summarise, formatRow, formatHistory, HISTORY_CAP } from "../history.ts"
+import { record, summarise, formatRow, formatHistory, formatCollapsedLine, HISTORY_CAP } from "../history.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -130,6 +130,21 @@ test("the summary line carries the session totals", () => {
   // that showed a single turn's cost would be the running-total confusion
   // in reverse.
   assert.ok(head.includes("$0.066"), head)
+})
+
+// ---- the collapsed line ------------------------------------------------------
+test("the collapsed line keeps one glance figure, not just a label", () => {
+  const out = formatCollapsedLine(turn({ rate: 38.1, rateWindow: "decode" }))
+  assert.ok(out.includes("view metrics"), out)
+  assert.ok(out.includes("38.1 tok/s"), "collapsing must not discard the one number that matters")
+})
+
+test("a whole-turn rate stays labelled even when collapsed", () => {
+  assert.ok(formatCollapsedLine(turn({ rate: 3.7, rateWindow: "whole" })).includes("3.7 tok/s overall"))
+})
+
+test("with no turn recorded yet, the label alone is shown", () => {
+  assert.equal(formatCollapsedLine(undefined), "▸ view metrics")
 })
 
 console.log(`\n${passed} passed`)
