@@ -54,11 +54,11 @@ function safe(v: unknown, depth = 0): string {
   if (typeof v === "number" || typeof v === "boolean") return String(v)
   if (typeof v === "function") return "fn"
   if (Array.isArray(v)) {
-    if (depth >= 2) return `[${v.length} items]`
+    if (depth >= 3) return `[${v.length} items]`
     return `[${v.slice(0, 4).map((x) => safe(x, depth + 1)).join(", ")}${v.length > 4 ? ", …" : ""}]`
   }
   if (typeof v === "object") {
-    if (depth >= 2) return `{${Object.keys(v as object).join(",")}}`
+    if (depth >= 3) return `{${Object.keys(v as object).join(",")}}`
     const e = Object.entries(v as Record<string, unknown>).slice(0, 12)
     return `{${e
       .map(([k, val]) => `${k}: ${secret(k) ? "<redacted>" : safe(val, depth + 1)}`)
@@ -159,11 +159,28 @@ export default Plugin.define({
           log("P2.content.updated.keys", Object.keys((evt ?? {}) as object))
         })
       )
+      // `session.idle` was subscribed first and never fired once across four
+      // turns. `session.execution.succeeded` is the event that actually marks
+      // a completed turn; both are kept so the log shows which fires.
+      off.push(
+        ctx.data.on("session.execution.succeeded", (evt) => {
+          log("P1.execution.succeeded", evt)
+          reportTurn(evt)
+        })
+      )
       off.push(
         ctx.data.on("session.idle", (evt) => {
-          // A turn finished. Dump the assistant message's own timing so P1
-          // can be answered by comparison, and start P4 by reading cost.
-          try {
+          log("P1.idle.fired", evt)
+          reportTurn(evt)
+        })
+      )
+    } catch (e) {
+      log("P2.subscribe.threw", String(e))
+    }
+
+    function reportTurn(evt: unknown): void {
+      {
+        try {
             const sid = pickSessionID(evt)
             if (!sid) return log("P2.idle.no-session", evt)
             const msgs = ctx.data.session.message.list(sid)
@@ -185,13 +202,10 @@ export default Plugin.define({
               })
             }
             log("P4.session.cost", ctx.data.session.cost(sid))
-          } catch (e) {
-            log("P2.idle.threw", String(e))
-          }
-        })
-      )
-    } catch (e) {
-      log("P2.subscribe.threw", String(e))
+        } catch (e) {
+          log("P2.turn.threw", String(e))
+        }
+      }
     }
 
     // ---- P3: which slots render, what do they receive, where do they clip?
