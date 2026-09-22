@@ -57,7 +57,7 @@ function safe(v: unknown, depth = 0): string {
     return `[${v.slice(0, 4).map((x) => safe(x, depth + 1)).join(", ")}${v.length > 4 ? ", …" : ""}]`
   }
   if (typeof v === "object") {
-    if (depth >= 3) return `{${Object.keys(v as object).join(",")}}`
+    if (depth >= 4) return `{${Object.keys(v as object).join(",")}}`
     const e = Object.entries(v as Record<string, unknown>).slice(0, 12)
     return `{${e
       .map(([k, val]) => `${k}: ${secret(k) ? "<redacted>" : safe(val, depth + 1)}`)
@@ -182,8 +182,22 @@ export default Plugin.define({
         try {
             const sid = pickSessionID(evt)
             if (!sid) return log("P2.idle.no-session", evt)
+            // message.list() is a union of message kinds (user, system,
+            // skill, shell, compaction, "idle", assistant...). The last
+            // entry after a turn is an "idle" marker, not the reply — scan
+            // backwards for the assistant message instead of taking the tail.
             const msgs = ctx.data.session.message.list(sid)
-            const last = msgs?.[msgs.length - 1]
+            let last: unknown = undefined
+            if (msgs) {
+              for (let i = msgs.length - 1; i >= 0; i--) {
+                const m = msgs[i] as { type?: string } | undefined
+                if (m?.type === "assistant") {
+                  last = m
+                  break
+                }
+              }
+            }
+            log("P1.message-kinds", (msgs ?? []).map((m) => (m as { type?: string }).type))
             log("P1.turn-landed", {
               sessionID: sid,
               type: (last as { type?: string } | undefined)?.type,
