@@ -214,7 +214,32 @@ export default Plugin.define({
                 ourFirstReasoningDelta: firstReasoning.get(id) ?? null,
               })
             }
-            log("P4.session.cost", ctx.data.session.cost(sid))
+            // P4: three independent cost readings plus the token counts they
+            // should be derivable from, on one line so they can be checked
+            // against the provider's published rates without cross-referencing.
+            const a = last as {
+              cost?: number
+              tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
+              model?: { id?: string; providerID?: string; variant?: string }
+              time?: { created?: number; completed?: number }
+            } | undefined
+            const t = a?.tokens
+            log("P4.cost-summary", {
+              model: a?.model?.id,
+              provider: a?.model?.providerID,
+              variant: a?.model?.variant,
+              input: t?.input,
+              output: t?.output,
+              reasoning: t?.reasoning,
+              cacheRead: t?.cache?.read,
+              cacheWrite: t?.cache?.write,
+              costOnMessage: a?.cost,
+              costFromSession: ctx.data.session.cost(sid),
+              durationMs:
+                a?.time?.completed !== undefined && a?.time?.created !== undefined
+                  ? a.time.completed - a.time.created
+                  : undefined,
+            })
         } catch (e) {
           log("P2.turn.threw", String(e))
         }
