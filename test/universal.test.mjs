@@ -190,4 +190,28 @@ test("context needs both the toggle AND a limit to show anything", () => {
   assert.ok(!noLimit.includes("limit"), "opting in with no known limit shows nothing, not 0%")
 })
 
+// ---- an impossible ttft is no ttft ------------------------------------------
+// P1, measured: on a 903ms cloud turn our first delta arrived 13ms AFTER the
+// message was marked complete, because these marks are TUI-side event
+// arrivals and delivery latency is part of what they measure. Rendering that
+// gives `ttft 0.92s` on a 0.90s turn.
+
+test("a ttft at or past the end of the turn is suppressed, not shown small", () => {
+  // The real shape: created 1000, completed 1903, first delta at 1915.
+  const info = { time: { created: 1000, completed: 1903 }, tokens: { output: 37 } }
+  const r = turnRate(37, info, { firstAt: 1915, lastAt: 1903 })
+  assert.equal(r.ttft, undefined, `a first token cannot follow completion, got ${r.ttft}`)
+  assert.ok(!universalLine("zen", "big-pickle", info, { firstAt: 1915, lastAt: 1903 }).includes("ttft"))
+})
+
+test("a negative ttft is suppressed too", () => {
+  const info = { time: { created: 5000, completed: 9000 }, tokens: { output: 10 } }
+  assert.equal(turnRate(10, info, { firstAt: 4000, lastAt: 9000 }).ttft, undefined)
+})
+
+test("a normal ttft still survives the guard", () => {
+  // Regression guard on the guard: the Splash turn must be unaffected.
+  assert.ok(Math.abs(turnRate(1247, splashInfo, splashTurn).ttft - 0.66) < 0.001)
+})
+
 console.log(`\n${passed} passed`)

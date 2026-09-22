@@ -113,9 +113,9 @@ a broken engine never blanks the panel; this is how you see them.
 
 ## Supported Engines
 
-Providers get the **universal** line from OpenCode's own per-turn
-data — rate, TTFT, exact token counts, cost and cache reuse, with the
-supported engines getting their own telemetry merged in. See
+Providers get the **universal** line from OpenCode's own per-turn data —
+rate, TTFT, exact token counts, cost and cache reuse; supported engines
+provide their own telemetry instead. See
 [Adding an Engine](#adding-an-engine).
 
 For local engines, the provider id in `opencode.json` must **exactly
@@ -125,20 +125,29 @@ plugin.
 | Provider | tok/s | TTFT | Prefill tok/s | Exact tokens | Cache info | Extras | Validated |
 |---|---|---|---|---|---|---|---|
 | [`mtplx`](#mtplx) | ✅ | ✅ | ✅ | ✅ | ❌ | MTP accept % | live |
-| [`omlx`](#omlx) | ✅ | ❌ | ✅ | ✅ | ✅ | — | live |
-| [`llamacpp`](#llamacpp) | ✅ | ❌ | ✅ | ✅ | ❌ | — | live |
-| [`llamafile`](#llamafile) | ✅ | ❌ | ✅ | ✅ | ❌ | — | live |
+| [`omlx`](#omlx) | ✅ | 🟡 | ✅ | ✅ | ✅ | — | live |
+| [`llamacpp`](#llamacpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | live |
+| [`llamafile`](#llamafile) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | live |
 | [`mlxserve`](#mlxserve) | ✅ | ✅ | ❌ | ✅ | ❌ | cold-start flag | live |
-| [`splash`](#splash) | ✅ | ❌ | ✅ | ✅ | ✅ | draft accept % | live |
-| [`koboldcpp`](#koboldcpp) | ✅ | ❌ | ✅ | ✅ | ❌ | draft accept % | live |
+| [`splash`](#splash) | ✅ | 🟡 | ✅ | ✅ | ✅ | draft accept % | live |
+| [`koboldcpp`](#koboldcpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | draft accept % | live |
 | [`vllm`](#vllm) | ✅ | ✅ | ❌ | ✅ | ✅ | — | live |
 | [`sglang`](#sglang) | ✅ | ✅ | ❌ | ✅ | ✅ | — | live |
 | [`vllmmlx`](#vllmmlx) | ✅ | ✅ | ❌ | ✅ | ❌ | — | live |
 | [`aphrodite`](#aphrodite) | ✅ | ✅ | ❌ | ✅ | ✅ | — | derived |
 | [`lmdeploy`](#lmdeploy) | ✅ | ✅ | ✅ | ✅ | ❌ | — | synthetic |
-| anything else | ✅ | ✅ | ❌ | ✅ | ✅ | — | live |
+| anything else | 🟡 | 🟡 | ❌ | 🟡 | 🟡 | — | live |
 
-`Validated`
+### Key
+
+- ✅ Provided by the engine
+- 🟡 Provided by OpenCode's universal layer, labelled `(host)` on the panel
+
+  Opencode's telemetry spans queue, network and event delivery as well as
+  prefill, so it is not the same measurement an engine reports,
+- ❌ Not available
+
+### Validated
 - **live**: run against a real server, deltas checked against its own
   response.
 - **derived**: a real vLLM capture with the metric prefix swapped

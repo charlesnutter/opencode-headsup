@@ -81,13 +81,29 @@ export function recoverLatest(
  * request, it shows the server's lifetime averages LABELLED as such; there is
  * no honest per-turn figure to give in those cases.
  */
-export function formatOmlxLine(now: OmlxSample, prev: OmlxSample | undefined): string {
+/**
+ * `hostTtft` is OpenCode's own time-to-first-token, in seconds, passed in by
+ * the caller -- this engine reports none. It is rendered `(host)` rather than
+ * as a bare `ttft` because it is NOT the same measurement an engine-reported
+ * one would be: it spans queue, network and TUI event delivery as well as
+ * prefill, where an engine stamps from the request reaching it. Same word,
+ * different span, so it says which.
+ */
+export function formatOmlxLine(
+  now: OmlxSample,
+  prev: OmlxSample | undefined,
+  hostTtft?: number
+): string {
   const header = `oMLX  ${short(now.model ?? "")}`
+  // Host-derived, and labelled as such. No derived figure on this line takes
+  // its numerator from one source and its denominator from the other -- ttft
+  // is measured directly, so nothing crosses the seam.
+  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
 
   if (!prev || prev.model !== now.model || now.requests <= prev.requests) {
     return [
       header,
-      `${nn(now.avgGen)} tok/s (server avg)`,
+      `${nn(now.avgGen)} tok/s (server avg)${ttftLabel}`,
       `prefill ${ni(now.avgPrefill)} tok/s (avg)`,
     ].join("\n")
   }
@@ -118,7 +134,7 @@ export function formatOmlxLine(now: OmlxSample, prev: OmlxSample | undefined): s
 
   return [
     header,
-    `${nn(decode)} tok/s${decodeLabel}`,
+    `${nn(decode)} tok/s${decodeLabel}${ttftLabel}`,
     `prefill ${ni(prefill)} tok/s${prefillLabel}`,
     `${ni(completion)} tok  (${ni(promptTokens)} prompt${cached > 0 ? `, ${ni(cached)} cached` : ""})`,
   ].join("\n")

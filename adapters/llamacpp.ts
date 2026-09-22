@@ -101,10 +101,27 @@ export function diffLlamaCppCounters(
 }
 
 /** `label` distinguishes llama.cpp from llamafile, which share this adapter. */
-export function formatLlamaCppLine(t: LlamaCppTurn, label: string, model: string): string {
+/**
+ * `hostTtft` is OpenCode's own time-to-first-token, in seconds, passed in by
+ * the caller -- this engine reports none. It is rendered `(host)` rather than
+ * as a bare `ttft` because it is NOT the same measurement an engine-reported
+ * one would be: it spans queue, network and TUI event delivery as well as
+ * prefill, where an engine stamps from the request reaching it. Same word,
+ * different span, so it says which.
+ */
+export function formatLlamaCppLine(
+  t: LlamaCppTurn,
+  label: string,
+  model: string,
+  hostTtft?: number
+): string {
+  // Host-derived, and labelled as such. No derived figure on this line takes
+  // its numerator from one source and its denominator from the other -- ttft
+  // is measured directly, so nothing crosses the seam.
+  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
   return [
     `${label}  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : "",
+    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(t.decodeS + t.prefillS, 2)}s`,
   ]

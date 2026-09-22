@@ -172,11 +172,23 @@ export async function fetchSplashSample(
  * is the honest reading, because Splash's prefill counter deliberately
  * excludes cache hits.
  */
-export function formatSplashLine(t: SplashTurn, model: string): string {
+/**
+ * `hostTtft` is OpenCode's own time-to-first-token, in seconds, passed in by
+ * the caller -- this engine reports none. It is rendered `(host)` rather than
+ * as a bare `ttft` because it is NOT the same measurement an engine-reported
+ * one would be: it spans queue, network and TUI event delivery as well as
+ * prefill, where an engine stamps from the request reaching it. Same word,
+ * different span, so it says which.
+ */
+export function formatSplashLine(t: SplashTurn, model: string, hostTtft?: number): string {
+  // Host-derived, and labelled as such. No derived figure on this line takes
+  // its numerator from one source and its denominator from the other -- ttft
+  // is measured directly, so nothing crosses the seam.
+  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
   const prompt = t.promptTokens + t.cachedTokens
   return [
     `Splash  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : "",
+    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(t.prefillS + t.decodeS, 2)}s`,
     `${ni(prompt)} prompt${t.cachedTokens > 0 ? `, ${ni(t.cachedTokens)} cached` : ""}`,

@@ -241,6 +241,13 @@ export default Plugin.define({
       turn: Turn | undefined,
       http: HttpOptions
     ): Promise<string | null> {
+      // OpenCode's own ttft for this turn. Five provider ids report none of
+      // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
+      // host has the marks regardless of which tier renders the line. Passed
+      // in rather than imported by the adapter, same as the Prometheus
+      // fallback below, so adapters stay leaves.
+      const hostTtft = turnRate(0, info, turn).ttft
+
       /** Shared by every Prometheus engine; they differ only by spec and URL. */
       const prom = async (
         id: string,
@@ -276,7 +283,7 @@ export default Plugin.define({
           setBase((d) => {
             d.omlx = now
           })
-          return formatOmlxLine(now, prev)
+          return formatOmlxLine(now, prev, hostTtft)
         }
 
         // llamafile is llama.cpp-derived and publishes identical metric names,
@@ -294,7 +301,7 @@ export default Plugin.define({
           })
           if (!prev) return null
           const t = diffLlamaCppCounters(prev, now)
-          return t ? formatLlamaCppLine(t, label, model) : null
+          return t ? formatLlamaCppLine(t, label, model, hostTtft) : null
         }
 
         case "splash": {
@@ -306,7 +313,7 @@ export default Plugin.define({
           })
           if (!prev) return null
           const t = diffSplashSamples(prev, now)
-          return t ? formatSplashLine(t, model) : null
+          return t ? formatSplashLine(t, model, hostTtft) : null
         }
 
         case "koboldcpp":
@@ -318,7 +325,7 @@ export default Plugin.define({
             d.koboldGens[cfg.koboldBase] = perf.total_gens
           })
           const t = koboldTurn(perf, prev)
-          return t ? formatKoboldLine(t, model) : null
+          return t ? formatKoboldLine(t, model, hostTtft) : null
         }
 
         case "mlxserve":
@@ -458,6 +465,12 @@ export default Plugin.define({
         cost: typeof info.cost === "number" && info.cost > 0 ? info.cost : undefined,
         cached: info.tokens?.cache?.read,
         source: enriched ? "engine" : "host",
+        // `source` describes the line's figures; `ttft` is the exception and
+        // always host-derived, because `turnRate` is what produced it here
+        // regardless of tier. Recording that per-figure keeps an enriched row
+        // from claiming an engine provenance it does not have for this one
+        // number.
+        ttftSource: "host",
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns

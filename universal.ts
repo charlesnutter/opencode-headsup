@@ -51,6 +51,19 @@ export function turnRate(
   if (turn) {
     if (turn.firstAt !== undefined && typeof start === "number") {
       ttft = (turn.firstAt - start) / 1000
+      // Suppress a physically impossible reading rather than print it. Our
+      // marks are TUI-side event arrivals, so delivery latency is part of
+      // the measurement: on a 903ms cloud turn (P1) the first delta landed
+      // 13ms AFTER the message was marked complete, which would have
+      // rendered `ttft 0.92s` on a 0.90s turn. A first token cannot arrive
+      // at or after the response finished, so when it appears to, the
+      // measurement failed and there is no figure -- not a small one.
+      //
+      // This is deliberately the impossible-value guard only. An absolute
+      // floor ("suppress under 200ms") would need a distribution of the
+      // delivery-latency error to place honestly, and one measured turn is
+      // not that.
+      if (ttft <= 0 || (total !== undefined && ttft >= total)) ttft = undefined
     }
     if (turn.firstAt !== undefined && turn.lastAt !== undefined && turn.lastAt > turn.firstAt && tokens > 0) {
       decodeTokS = tokens / ((turn.lastAt - turn.firstAt) / 1000)

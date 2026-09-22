@@ -226,4 +226,34 @@ test("Splash: a multi-request turn is labelled so sums are not misread", () => {
   assert.ok(formatSplashLine(many, "m").includes("3 requests this turn"))
 })
 
+// ---- host-supplied ttft ------------------------------------------------------
+// Splash reports no ttft of its own, and before this the engine line replaced
+// the universal one wholesale, so the figure vanished even though OpenCode
+// had the marks. It is labelled `(host)` because it is not the measurement an
+// engine-reported ttft would be: it spans queue, network and TUI event
+// delivery as well as prefill.
+
+test("Splash: a host ttft is rendered, and says it is the host's", () => {
+  const t = diffSplashSamples(
+    parseSplashSample(fixture("splash-before.prom")),
+    parseSplashSample(fixture("splash-after.prom"))
+  )
+  const out = formatSplashLine(t, "m", 0.66)
+  assert.ok(out.includes("ttft 0.66s (host)"), out)
+  // It must never pass as the engine's own figure.
+  assert.ok(!/ttft 0\.66s(?!\s*\(host\))/.test(out), out)
+})
+
+test("Splash: no host ttft means no ttft line, not an empty one", () => {
+  const t = diffSplashSamples(
+    parseSplashSample(fixture("splash-before.prom")),
+    parseSplashSample(fixture("splash-after.prom"))
+  )
+  const out = formatSplashLine(t, "m")
+  assert.ok(!out.includes("ttft"), out)
+  assert.ok(!out.includes("?"), out)
+  // and the rest of the line is unchanged by the new parameter
+  assert.deepEqual(out.split("\n").length, formatSplashLine(t, "m").split("\n").length)
+})
+
 console.log(`\n${passed} passed`)

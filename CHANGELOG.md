@@ -1,3 +1,15 @@
+## [0.2.0] – 2026-09-22
+### Added
+- TTFT for `omlx`, `llamacpp`, `llamafile`, `splash` and `koboldcpp`, which
+  report none of their own. Taken from OpenCode's stream marks and labelled
+  `(host)`, because it spans queue, network and event delivery as well as
+  prefill — not the same measurement an engine reports.
+
+### Fixed
+- A time-to-first-token at or past the end of its own turn is now suppressed
+  rather than shown. These marks are TUI-side event arrivals, so on a short
+  turn the first delta can land after the response is already complete.
+
 ## [0.1.1] – 2026-09-22
 ### Fixed
 - `ctrl+shift+h` opened the history panel but never closed it. The keymap

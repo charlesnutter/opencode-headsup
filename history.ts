@@ -33,6 +33,14 @@ export interface TurnRecord {
   /** Which window `rate` measured. A whole-turn rate is not a decode rate. */
   rateWindow?: "decode" | "whole"
   ttft?: number
+  /**
+   * Which tier `ttft` came from. Separate from `source` because it is the one
+   * figure that does not follow the line's tier: the host's stream marks are
+   * the only ttft available for several engines, so an engine-sourced row can
+   * still carry a host-derived ttft. One flag for the whole row would misreport
+   * it.
+   */
+  ttftSource?: Source
   /** Whole-turn duration in seconds. */
   totalS?: number
   /** This turn's cost in USD. Never a running session total. */

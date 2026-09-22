@@ -165,10 +165,22 @@ export function koboldTurn(now: KoboldPerf, prevTotalGens: number | undefined): 
  * only, not a sum across the window — there is nothing here to sum them
  * with, since the endpoint keeps no history beyond the most recent request.
  */
-export function formatKoboldLine(t: KoboldTurn, model: string): string {
+/**
+ * `hostTtft` is OpenCode's own time-to-first-token, in seconds, passed in by
+ * the caller -- this engine reports none. It is rendered `(host)` rather than
+ * as a bare `ttft` because it is NOT the same measurement an engine-reported
+ * one would be: it spans queue, network and TUI event delivery as well as
+ * prefill, where an engine stamps from the request reaching it. Same word,
+ * different span, so it says which.
+ */
+export function formatKoboldLine(t: KoboldTurn, model: string, hostTtft?: number): string {
+  // Host-derived, and labelled as such. No derived figure on this line takes
+  // its numerator from one source and its denominator from the other -- ttft
+  // is measured directly, so nothing crosses the seam.
+  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
   return [
     `KoboldCpp  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : "",
+    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(t.prefillS + t.decodeS, 2)}s`,
     t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",
