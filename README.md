@@ -3,9 +3,11 @@
        alt="OpenCode Heads Up" width="420">
 </h1>
 
-Per-turn inference telemetry in the OpenCode 2 sidebar — the serving
-engine's own metrics where an adapter exists, OpenCode's own turn data
-everywhere else.
+OpenCode Heads Up is a heads-up display (HUD) with per-turn telemetry
+for both local inference engines and remote models. It contains a
+universal layer of baseline metrics along with any additional data from
+the provider.
+
 
 ```
 MTPLX  arsis-dev-ukisai-swift-…
@@ -15,9 +17,9 @@ prefill 452 tok/s
 MTP 3.70x 99/96/80%
 ```
 
-Requires **OpenCode 2**. For the v1 line (OpenCode 1.18.x), see
-[opencode-engine-hud](https://github.com/charlesnutter/opencode-engine-hud),
-which stays published and in maintenance.
+Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
+(OpenCode 1.18.x), see
+[opencode-engine-hud](https://github.com/charlesnutter/opencode-engine-hud).
 
 ## Contents
 
@@ -27,7 +29,7 @@ which stays published and in maintenance.
 - [Supported Engines](#supported-engines)
 - [Engine Details](#engine-details)
 - [Adding an Engine](#adding-an-engine)
-- [What the numbers mean](#what-the-numbers-mean)
+- [Important Notes](#important-notes)
 - [Roadmap](#roadmap)
 
 ## Install
@@ -76,14 +78,14 @@ does not — there is nothing to choose.
 }
 ```
 
-`showContext` (default `false`) adds a `13% prompt/limit` line, computed as
-`tokens.input / ModelInfo.limit.context`. It is off by default and labelled
-`prompt/limit` rather than `context used` for a reason: OpenCode's sidebar
-already shows its own context percentage from a formula this plugin cannot
-see, and for custom providers `limit.context` is whatever you wrote in your
-own `opencode.json` — config, not a measurement. Opting in gets a number
-computed the same defensible way as everything else here; it does not get a
-promise it matches the one above it.
+**showContext** (default `false`)
+
+Adds a `13% prompt/limit` line, computed as
+`tokens.input / ModelInfo.limit.context` based on the model's
+config in `opencode.json`. Labeled as `prompt/limit` rather than
+`context used`.
+
+### Endpoints
 
 Engine endpoints use the defaults below, overridable per key or by env var.
 An engine that is not running just falls back to the universal layer.
@@ -111,11 +113,14 @@ a broken engine never blanks the panel; this is how you see them.
 
 ## Supported Engines
 
-Every provider gets the **universal** line from OpenCode's own per-turn data
-— rate, TTFT, exact token counts, cost and cache reuse. The provider ids
-below additionally get their engine's own telemetry merged in. Get the id
-exactly right (see [Adding an Engine](#adding-an-engine)) or you get the
-universal line only.
+Providers get the **universal** line from OpenCode's own per-turn
+data — rate, TTFT, exact token counts, cost and cache reuse, with the
+supported engines getting their own telemetry merged in. See
+[Adding an Engine](#adding-an-engine).
+
+For local engines, the provider id in `opencode.json` must **exactly
+match** the provider ids below, otherwise no data will be passed to the
+plugin.
 
 | Provider | tok/s | TTFT | Prefill tok/s | Exact tokens | Cache info | Extras | Validated |
 |---|---|---|---|---|---|---|---|
@@ -133,12 +138,17 @@ universal line only.
 | [`lmdeploy`](#lmdeploy) | ✅ | ✅ | ✅ | ✅ | ❌ | — | synthetic |
 | anything else | ✅ | ✅ | ❌ | ✅ | ✅ | — | live |
 
-`Validated` — **live**: run against a real server, deltas checked against
-its own response. **derived**: a real vLLM capture with the metric prefix
-swapped (Aphrodite is a vLLM fork, identical shape). **synthetic**: values
-fixed by hand from the engine's source to make the arithmetic checkable, not
-measured — `aphrodite` and `lmdeploy` are both CUDA-only and unavailable
-here. Per-file provenance in [`fixtures/README.md`](fixtures/README.md).
+`Validated`
+- **live**: run against a real server, deltas checked against its own
+  response.
+- **derived**: a real vLLM capture with the metric prefix swapped
+  (Aphrodite is a vLLM fork, identical shape).
+- **synthetic**: values fixed by hand from the engine's source to make
+  the arithmetic checkable, not measured — `aphrodite` and `lmdeploy`
+  are both CUDA-only and unavailable here.
+
+Per-file provenance is located in
+[`fixtures/README.md`](fixtures/README.md).
 
 ## Engine Details
 
@@ -317,41 +327,37 @@ Same shape for any OpenAI-compatible server:
 }
 ```
 
-**The provider id turns on enrichment** — use one from the
-[Supported Engines](#supported-engines) table. Any other id still works
-fully, with the universal layer only.
+## Important Notes
 
-## What the numbers mean
+### Decode rate, not whole-turn rate
 
-**The rate is a decode rate, not a whole-turn rate.** OpenCode's own status
-line divides tokens by the whole turn; this divides by the streaming window.
-On a turn with a long wait before the first token those differ by ~10x —
-measured: 38.1 tok/s over a 0.97s decode window against 3.7 over the same
-turn's 10.03s. Both are correct; the TTFT beside the rate is what reconciles
-them. A rate that genuinely *is* whole-turn (no stream window available) is
-labelled `overall`.
+OpenCode's own status line divides tokens by the whole turn; this
+divides by the streaming window. On a turn with a long wait before the
+first token those differ by ~10x — measured: 38.1 tok/s over a 0.97s
+decode window against 3.7 over the same turn's 10.03s. Both are
+correct; the TTFT beside the rate is what reconciles them. A rate that
+genuinely *is* whole-turn (no stream window available) is labelled
+`overall`.
 
-**Every figure is one turn, never a running total.** Four things in this API
-are cumulative where a per-turn figure is expected —
-`session.usage.updated`, `session.cost()`, raw engine counters, and
-`time.streamed` (which is stamped at the *end* of the stream, not the
-start, and is therefore not a TTFT). The per-turn figures here are
-differenced or measured accordingly.
+### Every figure is one turn, never a running total
 
-**Absent is not zero.** A free model shows no cost rather than `$0.00`, a
-cold prompt shows no cache line rather than `0 cached`, and a missing
-speculative-draft counter shows nothing rather than `0% accepted`.
+Four things in this API are cumulative where a per-turn figure is
+expected — `session.usage.updated`, `session.cost()`, raw engine
+counters, and `time.streamed` (which is stamped at the *end* of the
+stream, not the start, and is therefore not a TTFT). The per-turn
+figures here are differenced or measured accordingly.
+
+### Absent is not zero
+
+A free model shows no cost rather than `$0.00`, a cold prompt shows no
+cache line rather than `0 cached`, and a missing speculative-draft
+counter shows nothing rather than `0% accepted`.
 
 ## Roadmap
 
-- **Session-level metrics** in their own collapsible box — deliberately out
-  of 0.1.0: the aggregate is a different kind of number from the per-turn
-  figures beside it, so it wants its own surface rather than more lines.
-- **Zen/Go quota** (`opencode.ai/zen/go/v1/usage`) — opt-in, needs a
-  `PRIVACY.md` first, since it is the only call here that leaves the
-  machine.
-- Context percentage is **not** planned beyond the existing opt-in:
-  OpenCode 2 shows its own natively.
+- Session-level metrics
+- Zen/Go quota (`opencode.ai/zen/go/v1/usage`) — opt-in, needs a
+  `PRIVACY.md`
 
 ## License
 
