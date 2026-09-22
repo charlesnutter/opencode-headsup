@@ -6,7 +6,7 @@
 // "(+889 think)" form that read as an addition.
 // Run with: bun test/format.test.mjs
 import { strict as assert } from "node:assert"
-import { nn, ni, short, tokensLabel } from "../format.ts"
+import { nn, ni, short, tokensLabel, money } from "../format.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -85,6 +85,26 @@ test("no thinking means no think figure at all", () => {
 
 test("a non-finite total still renders the ? signal", () => {
   assert.equal(tokensLabel(NaN, 0), "? tok")
+})
+
+// ---- money: precision follows magnitude ------------------------------------
+test("a sub-cent cost keeps enough precision to not read as free", () => {
+  // Measured on a real metered turn. At 2 decimals this is "$0.00", which
+  // says free when it was not.
+  assert.equal(money(0.0006103944), "$0.0006")
+})
+
+test("a larger cost drops to the precision that suits it", () => {
+  assert.equal(money(0.06499), "$0.065")
+  assert.equal(money(1.5), "$1.50")
+})
+
+test("absent, zero and nonsense all render as nothing, not $0.00", () => {
+  // A free model must show no cost at all rather than a zero — the same
+  // absent-is-not-zero rule the counters follow.
+  for (const v of [undefined, null, 0, -1, NaN, Infinity, "0.5", {}]) {
+    assert.equal(money(v), "", `money(${String(v)})`)
+  }
 })
 
 console.log(`\n${passed} passed`)

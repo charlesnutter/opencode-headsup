@@ -121,4 +121,51 @@ test("ttft falls back to the message's created, not only turn.startAt", () => {
   assert.ok(Math.abs(r.ttft - 9.06) < 0.01, String(r.ttft))
 })
 
+// ---- cost and cache, from the host rather than any engine -------------------
+// Both measured in Phase 0 on real metered turns. These are what a cloud
+// user gets, where Tier 2 never fires at all.
+
+const metered = {
+  time: { created: 1000, completed: 2662 },
+  cost: 0.0006103944,
+  tokens: { input: 4277, output: 11, reasoning: 10, cache: { read: 2048, write: 0 } },
+}
+
+test("a metered turn shows this turn's cost and its cache reuse", () => {
+  const out = universalLine("opencode-go", "mimo-v2.6-flash", metered, { firstAt: 1500, lastAt: 2662 })
+  assert.ok(out.includes("$0.0006"), out)
+  assert.ok(out.includes("2048 cached"), out)
+})
+
+test("a free model shows no cost line rather than $0.00", () => {
+  const free = { ...metered, cost: 0 }
+  const out = universalLine("mtplx", "local", free, { firstAt: 1500, lastAt: 2662 })
+  assert.ok(!out.includes("$"), out)
+  // the cache figure is independent and survives
+  assert.ok(out.includes("2048 cached"), out)
+})
+
+test("a cold prompt shows no cache line rather than 0 cached", () => {
+  const cold = { ...metered, tokens: { ...metered.tokens, cache: { read: 0, write: 0 } } }
+  const out = universalLine("opencode-go", "m", cold, { firstAt: 1500, lastAt: 2662 })
+  assert.ok(!out.includes("cached"), out)
+  assert.ok(out.includes("$0.0006"), "cost is independent and survives")
+})
+
+test("with neither, the line is exactly the three it always was", () => {
+  const bare = { time: { created: 1000, completed: 2662 },
+    tokens: { input: 10, output: 11, reasoning: 0, cache: { read: 0, write: 0 } } }
+  const out = universalLine("mtplx", "m", bare, { firstAt: 1500, lastAt: 2662 })
+  assert.equal(out.split("\n").length, 3, out)
+})
+
+test("the per-turn cost is used, never a running session total", () => {
+  // Measured: session.cost() and message.cost differ by exactly the previous
+  // turn's cost. Only the latter describes this turn, and this line is
+  // per-turn like every other figure on it.
+  const out = universalLine("opencode-go", "m", { ...metered, cost: 0.06499 }, { firstAt: 1500, lastAt: 2662 })
+  assert.ok(out.includes("$0.065"), out)
+  assert.ok(!out.includes("0.0656"), "a session total must not leak in")
+})
+
 console.log(`\n${passed} passed`)

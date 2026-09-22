@@ -8,7 +8,7 @@
 // that also covered the model's thinking, understating reasoning-model rates
 // several-fold. See test/universal.test.mjs.
 
-import { nn, short, tokensLabel } from "./format"
+import { nn, ni, short, tokensLabel, money } from "./format"
 
 // ---- Tier 1: universal, from OpenCode's own per-turn events -----------------
 import type { SessionMessageAssistant } from "@opencode-ai/client"
@@ -104,6 +104,23 @@ export function universalLine(
         : ""
   // OpenCode's output count excludes reasoning, so the topline adds them back.
   const totals = `${tokensLabel(generated, reason)}${total !== undefined ? `  ${nn(total, 2)}s` : ""}`
-  return [`${provider}  ${short(model)}`, rate, totals].filter(Boolean).join("\n")
+
+  // Cost and cache reuse, both from the host rather than any engine — so
+  // every provider gets them, including cloud models where Tier 2 never
+  // fires. This is the one place a cloud user sees a cache signal at all.
+  //
+  // `info.cost` is THIS turn's cost. `ctx.data.session.cost()` is a running
+  // session total and would grow every turn while appearing to describe one
+  // (measured: they differ by exactly the previous turn's cost). Per-turn is
+  // what every other figure on this panel means, so per-turn is what is used.
+  //
+  // Both are omitted entirely when absent or zero: a free model showing
+  // "$0.00" and a cold prompt showing "0 cached" are the same absent-is-not-
+  // zero mistake the counters already avoid.
+  const cost = money(info?.cost)
+  const cacheRead = info?.tokens?.cache?.read ?? 0
+  const extras = [cost, cacheRead > 0 ? `${ni(cacheRead)} cached` : ""].filter(Boolean).join("  ")
+
+  return [`${provider}  ${short(model)}`, rate, totals, extras].filter(Boolean).join("\n")
 }
 

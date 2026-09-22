@@ -30,6 +30,7 @@ import { appendFileSync } from "node:fs"
 import { short } from "./format"
 import type { HttpOptions } from "./http"
 import { universalLine, turnRate, type Turn } from "./universal"
+import { record, formatHistory, type History, type TurnRecord } from "./history"
 
 import { fetchMtplxLatest, formatMtplxLine } from "./adapters/mtplx"
 import { fetchOmlxSample, formatOmlxLine, type OmlxSample } from "./adapters/omlx"
@@ -142,6 +143,9 @@ interface Panel {
 
 // ---- entry ------------------------------------------------------------------
 
+/** Identifies this plugin's panel among any others contributed to the slot. */
+const PANEL_NAME = "headsup.history"
+
 export default Plugin.define({
   id: "opencode-headsup",
 
@@ -154,6 +158,12 @@ export default Plugin.define({
     })
     const [base, setBase] = ctx.storage.memory<Baselines>("baselines", {
       initial: { llamacpp: {}, splash: {}, koboldGens: {}, mlxServeId: {}, prom: {} },
+    })
+    // Durable, unlike the baselines: this one is meant to outlive the TUI, so
+    // the drill-down still has a session's worth of turns after a restart.
+    // `record` bounds it, because a durable append with no cap grows forever.
+    const [history, setHistory] = ctx.storage.store<History>("history", {
+      initial: { turns: [] },
     })
 
     const show = (text: string): void => {
@@ -344,6 +354,8 @@ export default Plugin.define({
       let line: string | null = null
       try {
         line = await enrich(provider, model, info, turn, http)
+        // Recorded before the fallback overwrites it, so history knows which
+        // tier the figures actually came from.
       } catch (e: unknown) {
         // Non-negotiable 4: an adapter failure must never blank the panel, so
         // this falls through to Tier 1. That silence hid a ReferenceError for
@@ -352,7 +364,32 @@ export default Plugin.define({
         const err = e instanceof Error ? e : new Error(String(e))
         dbg(`${provider} adapter threw: ${err.name}: ${err.message}\n${err.stack ?? ""}`)
       }
+      const enriched = line !== null
       if (!line) line = universalLine(provider, model, info, turn)
+
+      // Keep the turn for the drill-down. `source` is the epistemics: an
+      // engine-measured rate and one derived from OpenCode's stream marks are
+      // different claims, and the panel must not flatten them.
+      const out = info.tokens?.output ?? 0
+      const reasoning = info.tokens?.reasoning ?? 0
+      const r = turnRate(out + reasoning, info, turn)
+      const rec: TurnRecord = {
+        at: Date.now(),
+        provider,
+        model,
+        tokens: out + reasoning,
+        reasoning: reasoning > 0 ? reasoning : undefined,
+        rate: r.decodeTokS,
+        rateWindow: r.rateWindow,
+        ttft: r.ttft,
+        totalS: r.total,
+        cost: typeof info.cost === "number" && info.cost > 0 ? info.cost : undefined,
+        cached: info.tokens?.cache?.read,
+        source: enriched ? "engine" : "host",
+      }
+      setHistory((d) => {
+        d.turns = record({ turns: d.turns }, rec).turns
+      }).catch((e: unknown) => dbg(`history write failed: ${String(e)}`))
 
       turns.delete(info.id)
       dbg(`turns: size ${turns.size} after completing ${info.id}`)
@@ -408,6 +445,21 @@ export default Plugin.define({
       )
     } catch (e: unknown) {
       dbg(`slot claim failed: ${String(e)}`)
+    }
+
+    // The drill-down. `name` lets several plugins contribute panels and each
+    // decide whether this one is theirs; rendering unconditionally would
+    // hijack every other plugin's panel.
+    try {
+      off.push(
+        ctx.ui.slot({
+          append: "session.panel",
+          render: (input) =>
+            input.name === PANEL_NAME ? <text>{formatHistory(history.turns)}</text> : null,
+        })
+      )
+    } catch (e: unknown) {
+      dbg(`panel claim failed: ${String(e)}`)
     }
 
     dbg(`setup complete: ${off.length} subscriptions`)
