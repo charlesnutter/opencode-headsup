@@ -122,21 +122,21 @@ For local engines, the provider id in `opencode.json` must **exactly
 match** the provider ids below, otherwise no data will be passed to the
 plugin.
 
-| Provider | tok/s | TTFT | Prefill tok/s | Exact tokens | Cache info | Extras | Validated |
-|---|---|---|---|---|---|---|---|
-| [`mtplx`](#mtplx) | ✅ | ✅ | ✅ | ✅ | ❌ | MTP accept % | live |
-| [`omlx`](#omlx) | ✅ | 🟡 | ✅ | ✅ | ✅ | — | live |
-| [`llamacpp`](#llamacpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | live |
-| [`llamafile`](#llamafile) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | live |
-| [`mlxserve`](#mlxserve) | ✅ | ✅ | ❌ | ✅ | ❌ | cold-start flag | live |
-| [`splash`](#splash) | ✅ | 🟡 | ✅ | ✅ | ✅ | draft accept % | live |
-| [`koboldcpp`](#koboldcpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | draft accept % | live |
-| [`vllm`](#vllm) | ✅ | ✅ | ❌ | ✅ | ✅ | — | live |
-| [`sglang`](#sglang) | ✅ | ✅ | ❌ | ✅ | ✅ | — | live |
-| [`vllmmlx`](#vllmmlx) | ✅ | ✅ | ❌ | ✅ | ❌ | — | live |
-| [`aphrodite`](#aphrodite) | ✅ | ✅ | ❌ | ✅ | ✅ | — | derived |
-| [`lmdeploy`](#lmdeploy) | ✅ | ✅ | ✅ | ✅ | ❌ | — | synthetic |
-| anything else | 🟡 | 🟡 | ❌ | 🟡 | 🟡 | — | live |
+| Provider | tok/s | TTFT | Prefill | Exact tokens | Cache | Extras | First turn | Validated |
+|---|---|---|---|---|---|---|---|---|
+| [`mtplx`](#mtplx) | ✅ | ✅ | ✅ | ✅ | ❌ | MTP accept % | ✅ | live |
+| [`omlx`](#omlx) | ✅ | 🟡 | ✅ | ✅ | ✅ | — | ✅ | live |
+| [`llamacpp`](#llamacpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | ❌ | live |
+| [`llamafile`](#llamafile) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | ❌ | live |
+| [`mlxserve`](#mlxserve) | ✅ | ✅ | ❌ | ✅ | ❌ | cold-start flag | ✅ | live |
+| [`splash`](#splash) | ✅ | 🟡 | ✅ | ✅ | ✅ | draft accept % | ❌ | live |
+| [`koboldcpp`](#koboldcpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | draft accept % | ✅ | live |
+| [`vllm`](#vllm) | ✅ | ✅ | ❌ | ✅ | ✅ | — | ❌ | live |
+| [`sglang`](#sglang) | ✅ | ✅ | ❌ | ✅ | ✅ | — | ❌ | live |
+| [`vllmmlx`](#vllmmlx) | ✅ | ✅ | ❌ | ✅ | ❌ | — | ❌ | live |
+| [`aphrodite`](#aphrodite) | ✅ | ✅ | ❌ | ✅ | ✅ | — | ❌ | derived |
+| [`lmdeploy`](#lmdeploy) | ✅ | ✅ | ✅ | ✅ | ❌ | — | ❌ | synthetic |
+| anything else | 🟡 | 🟡 | ❌ | 🟡 | 🟡 | — | — | live |
 
 ### Key
 
@@ -158,6 +158,28 @@ plugin.
 
 Per-file provenance is located in
 [`fixtures/README.md`](fixtures/README.md).
+
+### First Turn Data
+
+Most engines expose **cumulative counters**, not per-request figures: total
+tokens decoded since launch, total milliseconds spent decoding. A single
+reading says nothing about one turn. The figure for a turn is the difference
+between a reading taken before it and one taken after, which means the first
+turn after OpenCode starts has nothing to subtract from.
+
+- ✅ — engine telemetry from the very first turn. These publish a *last
+  request* figure (`mtplx`, `koboldcpp`) or an identifiable per-request
+  record (`mlxserve`), so one reading is enough. `omlx` renders too, but
+  its first-turn rates are server-lifetime averages, labelled `(avg)`.
+- ❌ — the first turn shows the universal line only, then engine telemetry
+  from the second turn on. Nothing is broken and nothing is lost; a rate
+  invented from a single counter reading would describe the whole server's
+  history, not your turn.
+- — — no adapter, so the universal layer is all there is, on every turn.
+
+The baseline lives in memory for the life of the TUI, so this applies once
+per OpenCode session rather than once per install. It is more visible with
+`splash opencode --standalone`, which starts a fresh process every time.
 
 ## Engine Details
 
