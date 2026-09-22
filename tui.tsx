@@ -149,6 +149,13 @@ interface Baselines {
 /** What the sidebar shows. Reactive — writing it re-renders the slot. */
 interface Panel {
   text: string
+  /**
+   * The session `text` describes. `panel` is memory-scoped so it dies with
+   * the TUI, but it still outlives a switch to a different session inside
+   * one -- and a line describing another session's last turn reads as this
+   * one's.
+   */
+  sessionID?: string
 }
 
 /** Durable UI preference, independent of any one turn. */
@@ -203,9 +210,10 @@ export default Plugin.define({
       }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
     }
 
-    const show = (text: string): void => {
+    const show = (text: string, sessionID: string): void => {
       setPanel((d) => {
         d.text = text
+        d.sessionID = sessionID
       })
     }
 
@@ -239,7 +247,16 @@ export default Plugin.define({
       model: string,
       info: SessionMessageAssistant,
       turn: Turn | undefined,
-      http: HttpOptions
+      http: HttpOptions,
+      /**
+       * Set when Tier 2 declined only because it has no baseline yet. That is
+       * the first turn against a counter-diff engine, and it is a different
+       * thing from the adapter failing: the universal line that follows is
+       * complete and correct, it simply is not the engine's own. Without
+       * saying so, the figures change shape on turn two and the rate can move
+       * by an order of magnitude, which reads as a bug.
+       */
+      tier2: { pendingBaseline: boolean }
     ): Promise<string | null> {
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
@@ -261,7 +278,10 @@ export default Plugin.define({
         setBase((d) => {
           d.prom[id] = now
         })
-        if (!prev) return null // no baseline yet: first turn since launch
+        if (!prev) {
+          tier2.pendingBaseline = true
+          return null // no baseline yet: first turn since launch
+        }
         const diff = diffPromSamples(prev, now)
         if (!diff) return null
         // Tier 1 supplies the fallback rate for engines with no duration
@@ -299,7 +319,10 @@ export default Plugin.define({
           setBase((d) => {
             d.llamacpp[provider] = now
           })
-          if (!prev) return null
+          if (!prev) {
+            tier2.pendingBaseline = true
+            return null
+          }
           const t = diffLlamaCppCounters(prev, now)
           return t ? formatLlamaCppLine(t, label, model, hostTtft) : null
         }
@@ -311,7 +334,10 @@ export default Plugin.define({
           setBase((d) => {
             d.splash[cfg.splashBase] = now
           })
-          if (!prev) return null
+          if (!prev) {
+            tier2.pendingBaseline = true
+            return null
+          }
           const t = diffSplashSamples(prev, now)
           return t ? formatSplashLine(t, model, hostTtft) : null
         }
@@ -411,7 +437,7 @@ export default Plugin.define({
       if (key !== lastKey) {
         // A model or provider switch replaces the panel rather than blending
         // two engines' figures into one reading.
-        show(`${provider}  ${short(model)}\n…`)
+        show(`${provider}  ${short(model)}\n…`, sessionID)
         lastKey = key
       }
 
@@ -421,9 +447,10 @@ export default Plugin.define({
       // them all at once rather than leaving them to run the clock out.
       const http: HttpOptions = { signal: life.signal }
 
+      const tier2 = { pendingBaseline: false }
       let line: string | null = null
       try {
-        line = await enrich(provider, model, info, turn, http)
+        line = await enrich(provider, model, info, turn, http, tier2)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -444,6 +471,11 @@ export default Plugin.define({
           cfg.display,
           cfg.display.context ? contextLimitFor(provider, model) : undefined
         )
+        // Say why this turn looks different from the next one. The figures
+        // above are measured and complete; only their SOURCE changes once a
+        // baseline exists, and the rate in particular can move an order of
+        // magnitude when it does.
+        if (tier2.pendingBaseline) line += "\nengine telemetry from the next turn"
       }
 
       // Keep the turn for the drill-down. `source` is the epistemics: an
@@ -456,6 +488,7 @@ export default Plugin.define({
         at: Date.now(),
         provider,
         model,
+        sessionID,
         tokens: out + reasoning,
         reasoning: reasoning > 0 ? reasoning : undefined,
         rate: r.decodeTokS,
@@ -485,7 +518,7 @@ export default Plugin.define({
         dbg(`report ${seq} superseded by ${reportSeq}, not rendering`)
         return
       }
-      show(line)
+      show(line, sessionID)
     }
 
     // ---- subscriptions ------------------------------------------------------
@@ -598,7 +631,7 @@ export default Plugin.define({
           // Renders the line only. The keybinds deliberately do NOT live
           // here: this slot unmounts when the panel takes over the sidebar,
           // and a layer registered here died with it.
-          render: () => {
+          render: (input) => {
             // Reading `panel.text`/`ui.collapsed`/`history.turns` here, not
             // captured outside, is what makes this reactive: a write to any
             // of them re-renders the slot. v1 needed a hand-rolled listener
@@ -612,7 +645,11 @@ export default Plugin.define({
             // selection off is the right default rather than a workaround.
             return (
               <text selectable={false} onMouseDown={() => toggleCollapsed()}>
-                {ui.collapsed ? formatCollapsedLine(history.turns[0]) : panel.text}
+                {ui.collapsed
+                  ? formatCollapsedLine(history.turns[0], input.sessionID)
+                  : panel.sessionID === input.sessionID
+                    ? panel.text
+                    : "inference · —"}
               </text>
             )
           },

@@ -133,18 +133,35 @@ test("the summary line carries the session totals", () => {
 })
 
 // ---- the collapsed line ------------------------------------------------------
+const SID = "ses_current"
+
 test("the collapsed line keeps one glance figure, not just a label", () => {
-  const out = formatCollapsedLine(turn({ rate: 38.1, rateWindow: "decode" }))
+  const out = formatCollapsedLine(turn({ rate: 38.1, rateWindow: "decode", sessionID: SID }), SID)
   assert.ok(out.includes("view metrics"), out)
   assert.ok(out.includes("38.1 tok/s"), "collapsing must not discard the one number that matters")
 })
 
 test("a whole-turn rate stays labelled even when collapsed", () => {
-  assert.ok(formatCollapsedLine(turn({ rate: 3.7, rateWindow: "whole" })).includes("3.7 tok/s overall"))
+  const out = formatCollapsedLine(turn({ rate: 3.7, rateWindow: "whole", sessionID: SID }), SID)
+  assert.ok(out.includes("3.7 tok/s overall"), out)
 })
 
 test("with no turn recorded yet, the label alone is shown", () => {
-  assert.equal(formatCollapsedLine(undefined), "▸ view metrics")
+  assert.equal(formatCollapsedLine(undefined, SID), "▸ view metrics")
+})
+
+// The reported bug: `history` is durable and outlives a TUI restart, so the
+// newest record can belong to a session that is not on screen -- a real
+// figure, but describing nothing the reader is looking at, possibly from a
+// different model.
+test("a turn from another session shows no figure, only the label", () => {
+  const stale = turn({ rate: 38.1, rateWindow: "decode", sessionID: "ses_previous" })
+  assert.equal(formatCollapsedLine(stale, SID), "▸ view metrics")
+})
+
+test("a record predating session tracking shows no figure either", () => {
+  // Written before `sessionID` existed: unattributable, so not attributed.
+  assert.equal(formatCollapsedLine(turn({ rate: 38.1 }), SID), "▸ view metrics")
 })
 
 console.log(`\n${passed} passed`)

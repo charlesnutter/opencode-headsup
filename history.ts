@@ -32,6 +32,14 @@ export interface TurnRecord {
   rate?: number
   /** Which window `rate` measured. A whole-turn rate is not a decode rate. */
   rateWindow?: "decode" | "whole"
+  /**
+   * The OpenCode session this turn belongs to. A glance figure must describe
+   * the session being looked at: `history` is durable and survives a TUI
+   * restart, so without this the collapsed line reported the last turn of a
+   * PREVIOUS session -- a real figure, but not one describing anything on
+   * screen, and possibly a different model entirely.
+   */
+  sessionID?: string
   ttft?: number
   /**
    * Which tier `ttft` came from. Separate from `source` because it is the one
@@ -145,8 +153,14 @@ export function formatRow(t: TurnRecord, modelWidth = 18): string {
  * rather than from whatever string the caller last rendered, so this stays
  * correct even if the panel's own format changes.
  */
-export function formatCollapsedLine(latest: TurnRecord | undefined): string {
-  if (!latest) return "▸ view metrics"
+export function formatCollapsedLine(
+  latest: TurnRecord | undefined,
+  sessionID?: string
+): string {
+  // No figure unless the newest turn is one from THIS session. Showing a
+  // stale rate beside "view metrics" reads as current, and a durable store
+  // means the newest record can be hours and several models old.
+  if (!latest || latest.sessionID !== sessionID) return "▸ view metrics"
   const rate =
     latest.rate !== undefined
       ? `${nn(latest.rate)} tok/s${latest.rateWindow === "whole" ? " overall" : ""}`

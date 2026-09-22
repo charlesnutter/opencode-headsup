@@ -34,15 +34,26 @@ Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
 
 ## Install
 
+```bash
+opencode plugin add @banburist/opencode-headsup
+```
+
+Restart OpenCode. The panel appears in the sidebar footer after the first
+turn. `opencode plugin list` shows what is installed; `plugin update` and
+`plugin remove` handle the rest.
+
+`npm install` does **not** work: it writes a `node_modules` OpenCode never
+reads. Installing has to go through OpenCode so the plugin lands in its own
+configuration.
+
+Equivalent, if you keep your config in version control:
+
 ```jsonc
 // ~/.config/opencode/cli.json
 {
   "plugins": ["@banburist/opencode-headsup"]
 }
 ```
-
-Restart OpenCode. The panel appears in the sidebar footer after the first
-turn.
 
 ## Keys
 
