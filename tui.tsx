@@ -32,7 +32,18 @@ function log(tag: string, payload?: unknown): void {
  */
 function secret(key: string): boolean {
   const k = key.toLowerCase()
-  return k.includes("key") || k.includes("token") || k.includes("secret") || k.includes("password")
+  // `tokens` is usage data and must NOT be redacted — an earlier version of
+  // this matched it on "token" and hid the exact figures P2 exists to read.
+  if (k === "tokens") return false
+  return (
+    k.includes("apikey") ||
+    k.includes("api_key") ||
+    k.includes("secret") ||
+    k.includes("password") ||
+    k.includes("authorization") ||
+    k.endsWith("token") ||
+    k === "key"
+  )
 }
 
 /** Shallow, bounded description — never dump a whole message tree. */
@@ -229,21 +240,20 @@ export default Plugin.define({
   },
 })
 
-/** Event payload shapes are unverified; probe defensively. */
+/**
+ * v2 events are `{ id, created, type, data: {...} }`. The first version of
+ * this looked in `properties` (v1's shape) for `messageID`, and the real
+ * field is `data.assistantMessageID` — so every delta handler silently
+ * matched nothing. Confirmed against SessionTextDelta in the generated types.
+ */
 function pickMessageID(evt: unknown): string | undefined {
-  const p = (evt ?? {}) as Record<string, unknown>
-  const direct = p["messageID"] ?? p["messageId"]
-  if (typeof direct === "string") return direct
-  const props = p["properties"] as Record<string, unknown> | undefined
-  const nested = props?.["messageID"] ?? props?.["messageId"]
-  return typeof nested === "string" ? nested : undefined
+  const d = (evt as { data?: Record<string, unknown> } | undefined)?.data
+  const id = d?.["assistantMessageID"] ?? d?.["messageID"]
+  return typeof id === "string" ? id : undefined
 }
 
 function pickSessionID(evt: unknown): string | undefined {
-  const p = (evt ?? {}) as Record<string, unknown>
-  const direct = p["sessionID"] ?? p["sessionId"]
-  if (typeof direct === "string") return direct
-  const props = p["properties"] as Record<string, unknown> | undefined
-  const nested = props?.["sessionID"] ?? props?.["sessionId"]
-  return typeof nested === "string" ? nested : undefined
+  const d = (evt as { data?: Record<string, unknown> } | undefined)?.data
+  const id = d?.["sessionID"]
+  return typeof id === "string" ? id : undefined
 }
