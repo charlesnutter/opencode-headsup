@@ -17,6 +17,7 @@
 
 import { sumLabeledMetric } from "../prometheus-text"
 import { httpText, type HttpOptions } from "../http"
+import { nn, ni, short } from "../format"
 
 /**
  * Names verified against the server's own metrics.py (Splash 1.0), which maps
@@ -158,4 +159,32 @@ export async function fetchSplashSample(
 ): Promise<SplashSample | null> {
   const text = await httpText(`${base}/metrics`, opts)
   return text === null ? null : parseSplashSample(text)
+}
+
+/**
+ * Splash draws the fullest line of any engine here: both phases are
+ * engine-timed, and prefix-cache reuse and speculative drafting are counted
+ * separately.
+ *
+ * Extracted from the v1 entry file, where it lived inline and was therefore
+ * untested — the same blind spot that hid two shipped bugs. `promptTokens` is
+ * what was recomputed and `cachedTokens` what the cache served; showing both
+ * is the honest reading, because Splash's prefill counter deliberately
+ * excludes cache hits.
+ */
+export function formatSplashLine(t: SplashTurn, model: string): string {
+  const prompt = t.promptTokens + t.cachedTokens
+  return [
+    `Splash  ${short(model)}`,
+    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : "",
+    t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
+    `${ni(t.completionTokens)} tok  ${nn(t.prefillS + t.decodeS, 2)}s`,
+    `${ni(prompt)} prompt${t.cachedTokens > 0 ? `, ${ni(t.cachedTokens)} cached` : ""}`,
+    t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",
+    // Only when a turn spanned several requests (tool round trips), so the
+    // figures above read as sums rather than as one reply.
+    t.requests > 1 ? `${ni(t.requests)} requests this turn` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
 }

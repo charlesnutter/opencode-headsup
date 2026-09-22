@@ -58,6 +58,22 @@ function declared(s) {
   // `[^)]*` lets `register({ … sidebar_footer() {` match as `register`,
   // swallowing the shorthand that follows it.
   add(/^\s*(\w+)\s*\([^)\n]*\)\s*\{/gm)
+  // Destructuring bindings. Neither array nor object form matches the
+  // `const <ident>` pattern above, so without these every name bound by
+  // `const [a, b] = …` reads as an undefined call. v2's storage API returns
+  // a [store, setter] tuple, which made this a false positive on the real
+  // entry rather than a hypothetical one.
+  for (const re of [
+    /(?:const|let|var)\s*\[([^\]]*)\]\s*=/g,
+    /(?:const|let|var)\s*\{([^}]*)\}\s*=/g,
+  ]) {
+    for (const m of s.matchAll(re)) {
+      for (const p of m[1].split(",")) {
+        const n = p.trim().split(":").pop().trim().replace(/^\.\.\./, "")
+        if (/^\w+$/.test(n)) out.add(n)
+      }
+    }
+  }
   // every parameter of every function(...) signature
   for (const m of s.matchAll(/function\s*\w*\s*\(([^)]*)\)/g)) {
     for (const p of m[1].split(",")) {
