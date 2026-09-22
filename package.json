@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@banburist/opencode-headsup",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Live inference telemetry pinned to the OpenCode 2 sidebar.",
+  "license": "MIT",
+  "author": "charlesnutter",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/charlesnutter/opencode-headsup.git"
+  },
+  "type": "module",
+  "exports": {
+    "./tui": {
+      "import": "./probe/tui.tsx"
+    }
+  },
+  "devDependencies": {
+    "@opencode-ai/client": "0.0.0-beta-19271",
+    "@opencode-ai/plugin": "0.0.0-beta-19271",
+    "@opencode-ai/theme": "0.0.0-beta-19271",
+    "@opentui/core": "0.5.11",
+    "@opentui/solid": "0.5.11",
+    "@types/node": "^22.0.0",
+    "solid-js": "1.9.12",
+    "typescript": "^5.6.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
