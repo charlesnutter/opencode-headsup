@@ -168,7 +168,7 @@ export function koboldTurn(now: KoboldPerf, prevTotalGens: number | undefined): 
 export function formatKoboldLine(t: KoboldTurn, model: string): string {
   return [
     `KoboldCpp  ${short(model)}`,
-    t.decodeTokS !== undefined ? `decode ${nn(t.decodeTokS)} tok/s` : "",
+    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : "",
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(t.prefillS + t.decodeS, 2)}s`,
     t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",

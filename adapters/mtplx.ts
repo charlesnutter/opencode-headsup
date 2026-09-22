@@ -51,7 +51,7 @@ export function formatMtplxLine(l: MtplxLatest, model: string): string {
   // Rate and TTFT share a line but are independently available: an
   // interrupted turn has the rate and not the TTFT.
   const rate = [
-    decode !== undefined ? `decode ${nn(decode)} tok/s` : "",
+    decode !== undefined ? `${nn(decode)} tok/s` : "",
     ttft !== undefined ? `ttft ${nn(ttft, 2)}s` : "",
   ]
     .filter(Boolean)

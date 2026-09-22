@@ -86,13 +86,19 @@ export function universalLine(
   const generated = out + reason
   const { decodeTokS, ttft, total, rateWindow } = turnRate(generated, info, turn)
 
-  // Named for the window it actually measured. OpenCode's own status line
-  // shows a whole-turn rate, so an unlabelled figure here reads as
-  // contradicting it when it is in fact a decode rate over a shorter window.
-  const rateName = rateWindow === "whole" ? "overall" : "decode"
+  // A decode rate is left unqualified: the ttft beside it is what explains
+  // why the whole turn was slower, without asserting where that time went
+  // (ttft is queue + network + prefill + first-token compute, and only some
+  // engines can tell those apart).
+  //
+  // The FALLBACK rate is qualified, because it is a different measurement —
+  // tokens over the whole turn, not over the stream window. On a turn with a
+  // long wait those differ ~10x, so letting it pass as a decode rate would be
+  // wrong rather than merely terse.
+  const overall = rateWindow === "whole" ? " overall" : ""
   const rate =
     decodeTokS !== undefined
-      ? `${rateName} ${nn(decodeTokS)} tok/s${ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""}`
+      ? `${nn(decodeTokS)} tok/s${overall}${ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""}`
       : ttft !== undefined
         ? `ttft ${nn(ttft, 2)}s`
         : ""

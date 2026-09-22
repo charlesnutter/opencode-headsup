@@ -124,7 +124,7 @@ test("renders four lines, labelled for whichever server it is", () => {
   const out = formatLlamaCppLine(t, "llama.cpp", "qwen2.5-0.5b-instruct-q4_k_m").split("\n")
   assert.equal(out.length, 4)
   assert.ok(out[0].startsWith("llama.cpp  "))
-  assert.ok(/^decode \d+\.\d tok\/s$/.test(out[1]), out[1])
+  assert.ok(/^\d+\.\d tok\/s$/.test(out[1]), out[1])
   assert.ok(out[2].startsWith("prefill "))
   assert.ok(out[3].startsWith("32 tok"))
   // llamafile shares this adapter; only the label changes.

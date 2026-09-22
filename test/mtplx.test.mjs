@@ -59,10 +59,9 @@ test("a completed turn renders all five lines from the live receipt", () => {
   const out = formatMtplxLine(completed.latest, MODEL).split("\n")
   assert.equal(out.length, 5, out.join(" | "))
   assert.ok(out[0].startsWith("MTPLX  "))
-  // The rate is named for the window it measured: OpenCode's own status line
-  // shows a whole-turn rate, so an unlabelled figure here would read as
-  // contradicting it when it is in fact a decode rate over a shorter window.
-  assert.ok(/^decode \d+\.\d tok\/s {2}ttft \d\.\d{2}s$/.test(out[1]), out[1])
+  // The ttft beside the rate is what reconciles it with OpenCode's own
+  // whole-turn figure; the rate itself carries no qualifier.
+  assert.ok(/^\d+\.\d tok\/s {2}ttft \d\.\d{2}s$/.test(out[1]), out[1])
   assert.ok(/^prefill \d+ tok\/s$/.test(out[2]), out[2])
   assert.ok(out[3].startsWith(`${completed.latest.completion_tokens} tok`))
   assert.ok(/^MTP \d+\.\d{2}x( \d+(\/\d+)*%)?$/.test(out[4]), out[4])
@@ -95,7 +94,7 @@ test("an interrupted turn omits the missing figures instead of printing ?", () =
 test("an interrupted turn still shows decode rate, tokens and elapsed time", () => {
   const out = formatMtplxLine(interrupted.latest, MODEL).split("\n")
   const l = interrupted.latest
-  assert.ok(out[1].startsWith(`decode ${l.decode_tok_s.toFixed(1)} tok/s`))
+  assert.ok(out[1].startsWith(`${l.decode_tok_s.toFixed(1)} tok/s`))
   assert.ok(out.some((line) => line.startsWith(`${l.completion_tokens} tok`)))
 })
 

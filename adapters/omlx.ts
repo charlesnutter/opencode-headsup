@@ -118,7 +118,7 @@ export function formatOmlxLine(now: OmlxSample, prev: OmlxSample | undefined): s
 
   return [
     header,
-    `decode ${nn(decode)} tok/s${decodeLabel}`,
+    `${nn(decode)} tok/s${decodeLabel}`,
     `prefill ${ni(prefill)} tok/s${prefillLabel}`,
     `${ni(completion)} tok  (${ni(promptTokens)} prompt${cached > 0 ? `, ${ni(cached)} cached` : ""})`,
   ].join("\n")

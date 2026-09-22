@@ -90,24 +90,25 @@ test("TTFT comes from the first delta, not from completion", () => {
 // same turn. Both were right: 37 tokens over a 0.97s decode window vs over
 // 10.03s total. Unlabelled, they read as a contradiction.
 
-test("a streamed turn names its rate decode, not overall", () => {
+test("a streamed turn leaves its decode rate unqualified", () => {
   const info = { time: { created: 1000, completed: 11030 }, tokens: { input: 0, output: 37, reasoning: 0, cache: { read: 0, write: 0 } } }
   const turn = { firstAt: 10060, lastAt: 11030 }
   const r = turnRate(37, info, turn)
   assert.equal(r.rateWindow, "decode")
   // 37 tokens over the 0.97s stream window, not the 10.03s total.
   assert.ok(Math.abs(r.decodeTokS - 38.1) < 0.5, String(r.decodeTokS))
-  assert.ok(universalLine("mtplx", "m", info, turn).includes("decode "))
+  // Unqualified: the ttft beside it does the explaining.
+  assert.ok(!universalLine("mtplx", "m", info, turn).includes("overall"))
 })
 
-test("with no stream window, the rate is named overall instead", () => {
+test("a whole-turn fallback rate is qualified as overall", () => {
   const info = { time: { created: 1000, completed: 11030 }, tokens: { input: 0, output: 37, reasoning: 0, cache: { read: 0, write: 0 } } }
   const r = turnRate(37, info, undefined)
   assert.equal(r.rateWindow, "whole")
   // 37 over the full 10.03s — a different number entirely, so it must not
   // claim to be a decode rate.
   assert.ok(Math.abs(r.decodeTokS - 3.7) < 0.1, String(r.decodeTokS))
-  assert.ok(universalLine("mtplx", "m", info, undefined).includes("overall "))
+  assert.ok(universalLine("mtplx", "m", info, undefined).includes("tok/s overall"))
 })
 
 test("ttft falls back to the message's created, not only turn.startAt", () => {
