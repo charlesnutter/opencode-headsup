@@ -140,4 +140,36 @@ test("tui.tsx: every local module it imports from actually exports those names",
   assert.deepEqual(problems, [], problems.join("; "))
 })
 
+// ---- the keymap layer's owner ------------------------------------------------
+// Regression guard for "ctrl+shift+h opens the history but never closes it",
+// which took four attempts because every wrong answer typechecked and passed
+// the whole suite.
+//
+// Measured, from OpenCode's own log:
+//   - Registered in the `sidebar.footer` render, the layer's lifetime was that
+//     component's. With `sidebar: "auto"` the sidebar unmounts when the panel
+//     takes over, so the layer went with it -- the debug log showed the open
+//     firing and the close press reaching nothing at all.
+//   - A bare `createRoot` owner fixed the lifetime and broke the plugin on
+//     load: `Keymap.Provider is missing`. `ctx.keymap.layer` resolves a Solid
+//     context, so it has to sit inside the HOST's component tree.
+//
+// `app` is the only slot satisfying both. Neither failure was catchable by
+// types or by any other test here, so this pins the structural fact instead.
+test("tui.tsx: the keymap layer is owned by the app slot, not the sidebar", () => {
+  const src = read("tui.tsx")
+  const claims = [...src.matchAll(/ctx\.ui\.slot\(\{([\s\S]*?)\n\s{8}\}\)/g)].map((m) => m[1])
+  assert.ok(claims.length >= 3, `expected the app/footer/panel claims, found ${claims.length}`)
+
+  const owner = claims.filter((c) => c.includes("ctx.keymap.layer("))
+  assert.equal(owner.length, 1, "exactly one slot claim may register the keymap layer")
+  assert.match(owner[0], /append:\s*"app"/,
+    "the keymap layer must be registered in the `app` slot: any slot that can unmount " +
+    "(sidebar.footer, session.panel) takes the keybinds down with it")
+
+  // And the owner that broke plugin load must not come back.
+  assert.ok(!/\bcreateRoot\s*\(/.test(src),
+    "createRoot cannot own the layer -- the host's Keymap context is not reachable from it")
+})
+
 console.log(`\n${passed} passed`)

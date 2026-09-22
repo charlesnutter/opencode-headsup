@@ -508,60 +508,84 @@ export default Plugin.define({
       dbg(`subscribe failed: ${String(e)}`)
     }
 
+    // ---- keybinds ------------------------------------------------------------
+    // MEASURED twice over, and neither answer was the obvious one.
+    //
+    // 1. Registered inside the `sidebar.footer` render, the layer's lifetime
+    //    was that component's. With `sidebar: "auto"` the sidebar unmounts
+    //    when the panel takes over, so the layer died with it: the log showed
+    //    `headsup.panel fired` on the open and NOTHING on the press meant to
+    //    close, because the command no longer existed. `mode: "global"` could
+    //    not have helped -- the layer was gone, not filtered.
+    // 2. A bare `createRoot` owner fixed the lifetime but broke the plugin
+    //    outright: `Keymap.Provider is missing`. `ctx.keymap.layer` resolves a
+    //    Solid context, so it must be called inside the HOST's component tree,
+    //    not merely inside some owner of ours.
+    //
+    // `app` is the one slot that satisfies both: a real host component, and
+    // the root, so it outlives every sidebar and panel mount. It renders
+    // nothing -- it exists purely to own the keymap layer.
+    try {
+      off.push(
+        ctx.ui.slot({
+          append: "app",
+          render: () => {
+            ctx.keymap.layer(() => ({
+      // `mode` defaults to "base"; "global" is the documented opt-out.
+      // Kept because a HUD toggle should reach the user in whatever mode
+      // they are in -- NOT because it fixed anything. It was added for the
+      // close bug on a diagnosis the log then disproved.
+      mode: "global",
+      commands: [
+        {
+          id: "headsup.toggle",
+          title: "Toggle Engine Telemetry",
+          description: "Collapse or expand the inference telemetry line in the sidebar",
+          group: "opencode-headsup",
+          bind: "ctrl+shift+m",
+          palette: true,
+          run: () => {
+            toggleCollapsed()
+          },
+        },
+        {
+          id: "headsup.panel",
+          title: "Show Inference History",
+          description: "Open or close the per-turn telemetry drill-down",
+          group: "opencode-headsup",
+          bind: "ctrl+shift+h",
+          palette: true,
+          run: () => {
+            // A snapshot read, not a reactive one: this decides once.
+            // `current()` is per-plugin ("This plugin's active panel"), so
+            // it never sees another plugin's panel.
+            const open = ctx.ui.panel.current()?.name === PANEL_NAME
+            dbg(`panel toggle -> ${open ? "close" : "open"}`)
+            if (open) ctx.ui.panel.close()
+            else ctx.ui.panel.open(PANEL_NAME)
+          },
+        },
+      ],
+            }))
+            return null
+          },
+        })
+      )
+    } catch (e: unknown) {
+      dbg(`keymap claim failed: ${String(e)}`)
+    }
+
+
     // ---- the panel ----------------------------------------------------------
 
     try {
       off.push(
         ctx.ui.slot({
           append: "sidebar.footer",
-          // A real component, not a bare closure returning JSX: it needs a
-          // Solid reactive owner to register the keymap layer with, per that
-          // API's own doc comment ("owned by the calling component"). Called
-          // once at mount -- Solid component bodies run once; reactivity
-          // comes from reading signals inside JSX or an effect, not from
-          // re-invoking the function -- so this registers the layer once and
-          // the host disposes it automatically when the slot unmounts.
-          //
-          // NOT yet live-verified. Reasoned from the API's own documentation,
-          // same as everything else that was true until a live run said
-          // otherwise (P1's ttft fix, Bug 1/2 in the tok/s episode). Confirm
-          // the binding actually appears and survives a slot unmount before
-          // treating this as settled.
+          // Renders the line only. The keybinds deliberately do NOT live
+          // here: this slot unmounts when the panel takes over the sidebar,
+          // and a layer registered here died with it.
           render: () => {
-            ctx.keymap.layer(() => ({
-              commands: [
-                {
-                  id: "headsup.toggle",
-                  title: "Toggle Engine Telemetry",
-                  description: "Collapse or expand the inference telemetry line in the sidebar",
-                  group: "opencode-headsup",
-                  bind: "ctrl+shift+m",
-                  palette: true,
-                  run: () => {
-                    toggleCollapsed()
-                  },
-                },
-                {
-                  id: "headsup.panel",
-                  title: "Show Inference History",
-                  description: "Open or close the per-turn telemetry drill-down",
-                  group: "opencode-headsup",
-                  bind: "ctrl+shift+h",
-                  palette: true,
-                  run: () => {
-                    // A snapshot read at the moment the command runs, not a
-                    // reactive one -- this decides once whether to open or
-                    // close, it does not need to re-run when the panel state
-                    // changes for some other reason.
-                    if (ctx.ui.panel.current()?.name === PANEL_NAME) {
-                      ctx.ui.panel.close()
-                    } else {
-                      ctx.ui.panel.open(PANEL_NAME)
-                    }
-                  },
-                },
-              ],
-            }))
             // Reading `panel.text`/`ui.collapsed`/`history.turns` here, not
             // captured outside, is what makes this reactive: a write to any
             // of them re-renders the slot. v1 needed a hand-rolled listener
