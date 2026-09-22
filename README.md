@@ -345,7 +345,8 @@ speculative-draft counter shows nothing rather than `0% accepted`.
 ## Roadmap
 
 - **Session-level metrics** in their own collapsible box — deliberately out
-  of 0.1.0, see [`PLAN.md`](PLAN.md).
+  of 0.1.0: the aggregate is a different kind of number from the per-turn
+  figures beside it, so it wants its own surface rather than more lines.
 - **Zen/Go quota** (`opencode.ai/zen/go/v1/usage`) — opt-in, needs a
   `PRIVACY.md` first, since it is the only call here that leaves the
   machine.
