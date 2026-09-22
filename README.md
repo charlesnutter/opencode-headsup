@@ -1,4 +1,7 @@
-# OpenCode Heads Up
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/headsup-wordmark-dark.svg"
+       alt="OpenCode Heads Up" width="420">
+</h1>
 
 Per-turn inference telemetry in the OpenCode 2 sidebar — the serving
 engine's own metrics where an adapter exists, OpenCode's own turn data
