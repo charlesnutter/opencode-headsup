@@ -1,0 +1,24 @@
+# NOTE: SYNTHESIZED, not a live capture — LMDeploy is CUDA-only and cannot run
+# on this machine. Metric names and the {model_name,engine} label shape are
+# verified against lmdeploy/metrics/loggers.py; the values are chosen so the
+# diff arithmetic is checkable.
+# TYPE lmdeploy:prompt_tokens_total counter
+lmdeploy:prompt_tokens_total{model_name="internlm/internlm2-chat-7b",engine="0"} 1000.0
+lmdeploy:prompt_tokens_created{model_name="internlm/internlm2-chat-7b",engine="0"} 1.789836289e+09
+# TYPE lmdeploy:generation_tokens_total counter
+lmdeploy:generation_tokens_total{model_name="internlm/internlm2-chat-7b",engine="0"} 3000.0
+# TYPE lmdeploy:time_to_first_token_seconds histogram
+lmdeploy:time_to_first_token_seconds_bucket{model_name="internlm/internlm2-chat-7b",engine="0",le="0.1"} 1.0
+lmdeploy:time_to_first_token_seconds_count{model_name="internlm/internlm2-chat-7b",engine="0"} 5.0
+lmdeploy:time_to_first_token_seconds_sum{model_name="internlm/internlm2-chat-7b",engine="0"} 1.5
+# TYPE lmdeploy:e2e_request_latency_seconds histogram
+lmdeploy:e2e_request_latency_seconds_count{model_name="internlm/internlm2-chat-7b",engine="0"} 5.0
+lmdeploy:e2e_request_latency_seconds_sum{model_name="internlm/internlm2-chat-7b",engine="0"} 12.0
+# TYPE lmdeploy:request_prefill_time_seconds histogram
+lmdeploy:request_prefill_time_seconds_count{model_name="internlm/internlm2-chat-7b",engine="0"} 5.0
+lmdeploy:request_prefill_time_seconds_sum{model_name="internlm/internlm2-chat-7b",engine="0"} 1.0
+# TYPE lmdeploy:request_decode_time_seconds histogram
+lmdeploy:request_decode_time_seconds_count{model_name="internlm/internlm2-chat-7b",engine="0"} 5.0
+lmdeploy:request_decode_time_seconds_sum{model_name="internlm/internlm2-chat-7b",engine="0"} 10.0
+# TYPE lmdeploy:num_requests_running gauge
+lmdeploy:num_requests_running{model_name="internlm/internlm2-chat-7b",engine="0"} 0.0

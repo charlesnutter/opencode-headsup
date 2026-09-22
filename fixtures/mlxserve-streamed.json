@@ -1,0 +1,56 @@
+{
+  "requests": [
+    {
+      "request_id": "773184f7-58ad-49fa-b10f-546413832293",
+      "model": "qwen05",
+      "endpoint": "/v1/chat/completions",
+      "timestamp": "2026-09-19T23:30:46Z",
+      "total_duration_ms": 356.2,
+      "ttft_ms": 96.2,
+      "tokens_per_second": 361.4,
+      "prompt_tokens": null,
+      "completion_tokens": 94,
+      "status_code": 200,
+      "error": null,
+      "cold_start": false
+    },
+    {
+      "request_id": "baa0ec33-139c-44c0-bc7c-17fb3c9def5a",
+      "model": "qwen05",
+      "endpoint": "/v1/chat/completions",
+      "timestamp": "2026-09-19T23:29:23Z",
+      "total_duration_ms": 463.5,
+      "ttft_ms": 198.8,
+      "tokens_per_second": 377.8,
+      "prompt_tokens": null,
+      "completion_tokens": 100,
+      "status_code": 200,
+      "error": null,
+      "cold_start": false
+    },
+    {
+      "request_id": "536efe43-e113-4540-91ec-835af1944446",
+      "model": "qwen05",
+      "endpoint": "/v1/chat/completions",
+      "timestamp": "2026-09-19T23:29:10Z",
+      "total_duration_ms": 4778.7,
+      "ttft_ms": 4778.7,
+      "tokens_per_second": 12.6,
+      "prompt_tokens": 33,
+      "completion_tokens": 60,
+      "status_code": 200,
+      "error": null,
+      "cold_start": true
+    }
+  ],
+  "_provenance": {
+    "note": "LIVE CAPTURE — real response from a running mlx-serve, not hand-written.",
+    "captured": "2026-09-19T23:30:47Z",
+    "host": "darwin arm64",
+    "endpoint": "http://127.0.0.1:8095/v1/metrics/requests",
+    "server": "mlx-serve 0.1.0 (wraps mlx_lm.server)",
+    "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit as \"qwen05\"",
+    "scenario": "history head is a STREAMED request: ttft_ms is real and tokens_per_second is a decode rate",
+    "generation_usage": "streaming request — mlx_lm.server reports no usage block"
+  }
+}

@@ -1,0 +1,108 @@
+# LIVE CAPTURE — real bytes from a running Splash server, not hand-written.
+#   captured : 2026-09-19T23:04:43Z
+#   host     : darwin arm64
+#   endpoint : http://127.0.0.1:8000/metrics
+#   engine   : Splash 1.0 (Apple Silicon; /metrics is always on, no flag)
+#   model    : incoai/Qwen3.8-27B-Splash
+#   scenario : immediately after that cached generation
+#   the generation between these two captures reported:
+#     {"prompt_tokens":63,"completion_tokens":200,"total_tokens":263,"prompt_tokens_details":{"cached_tokens":32},"completion_tokens_details":{"reasoning_tokens":140}}
+# HELP splash_info Splash runtime metrics.
+# TYPE splash_info gauge
+splash_info{runtime="native"} 1
+splash_memory_pressure{state="normal"} 1
+splash_memory_pressure{state="warning"} 0
+splash_memory_pressure{state="critical"} 0
+splash_ready 1
+splash_metal_healthy 1
+splash_transport_pending 0
+splash_frontend_active 0
+splash_frontend_waiting 0
+splash_requests_submitted_total 3
+splash_requests_completed_total 3
+splash_requests_cancelled_total 0
+splash_requests_failed_total 0
+splash_scheduler_queued 0
+splash_scheduler_waiting_resources 0
+splash_cache_resource_suspensions_total 0
+splash_cache_resource_resumptions_total 0
+splash_cache_resource_replay_tokens_total 0
+splash_scheduler_prefilling 0
+splash_scheduler_decoding 0
+splash_scheduler_waiting_mask 0
+splash_scheduler_prefill_batches_total 4
+splash_scheduler_prefill_rows_total 125
+splash_scheduler_decode_batches_total 146
+splash_scheduler_decode_b1_total 146
+splash_scheduler_decode_b2_total 0
+splash_scheduler_decode_b3_total 0
+splash_scheduler_decode_b4_total 0
+splash_kv_blocks 20
+splash_kv_pages_total 32768
+splash_kv_pages_free 32748
+splash_kv_pages_active 0
+splash_kv_pages_cache 20
+splash_kv_pages_resident 128
+splash_kv_pages_free_resident 108
+splash_kv_resident_backing_bytes 136314880
+splash_kv_reclaimable_backing_bytes 0
+splash_kv_sparse_tile_bytes 65536
+splash_kv_pending_unmaps 0
+splash_kv_pending_unmap_ms 0
+splash_kv_unmaps_completed 0
+splash_kv_unmap_last_ms 0
+splash_kv_unmap_max_ms 0
+splash_kv_map_wait_event 0
+splash_kv_pending_map_wait_ms 0
+splash_kv_map_wait_last_ms 0
+splash_kv_map_wait_max_ms 0
+splash_state_entries 1
+splash_state_pinned 0
+splash_state_bytes 196083712
+splash_state_active_cells 0
+splash_state_hits_total 2
+splash_state_misses_total 1
+splash_state_publications_total 1
+splash_state_evictions_total 0
+splash_cache_hits_total 2
+splash_cache_cold_misses_total 1
+splash_cache_reused_tokens_total 64
+splash_cache_lazy_junctions_total 0
+splash_target_prefill_rows_total 2256
+splash_draft_context_active_rows_total 2224
+splash_draft_context_materialization_rows_total 32
+splash_draft_context_avoided_rows_total 0
+splash_draft_state_restore_skipped_total 0
+splash_draft_state_resets_total 14
+splash_constraint_mask_overlap_batches_total 0
+splash_constraint_mask_overlap_requests_total 0
+splash_constraint_mask_target_forward_gpu_milliseconds 0
+splash_constraint_mask_residual_wait_milliseconds 0
+splash_image_encodes_total 0
+splash_image_embedding_reuses_total 0
+splash_memory_current_bytes 19055050752
+splash_memory_peak_bytes 19908591616
+splash_memory_denied_reservations_total 0
+splash_memory_limit_bytes 53744226468
+splash_memory_headroom_bytes 34689175716
+splash_admission_waiting_memory 0
+splash_admission_waiting_concurrency 0
+splash_admission_suspended 0
+splash_admission_oldest_wait_milliseconds 0
+splash_ttft_p50_milliseconds 287.193166
+splash_ttft_p95_milliseconds 397.2588751
+splash_itl_p50_milliseconds 24.16945831
+splash_itl_p95_milliseconds 72.71595883
+splash_prefill_input_tokens_total 125
+splash_prefill_wall_milliseconds_total 622.491458
+splash_prefill_tokens_per_second 200.8059683
+splash_decode_output_tokens_total 566
+splash_decode_wall_milliseconds_total 10516.52521
+splash_decode_tokens_per_second 53.82005832
+splash_drafted_tokens_total 1022
+splash_accepted_draft_tokens_total 419
+splash_draft_acceptance_ratio 0.4099804305
+splash_capacity_failures_total 0
+splash_metal_failures_total 0
+splash_response_store_entries 0
+splash_response_store_bytes 0

@@ -1,0 +1,33 @@
+{
+  "last_process": 0.1428571492433548,
+  "last_eval": 3.875,
+  "last_token_count": 8,
+  "last_input_count": 12,
+  "last_process_time": 0.0017142857909202575,
+  "last_eval_time": 0.031,
+  "last_process_speed": 6999.9996870756295,
+  "last_eval_speed": 258.06451612903226,
+  "last_seed": 936638,
+  "last_draft_success": 0,
+  "last_draft_failed": 0,
+  "total_gens": 4,
+  "stop_reason": 1,
+  "total_img_gens": 0,
+  "total_tts_gens": 0,
+  "total_transcribe_gens": 0,
+  "queue": 0,
+  "idle": 1,
+  "hordeexitcounter": -1,
+  "uptime": 102.1519980430603,
+  "idletime": 0.36302804946899414,
+  "quiet": true,
+  "_provenance": {
+    "note": "LIVE CAPTURE \u2014 real response from a running KoboldCpp server, not hand-written.",
+    "captured": "2026-09-20T20:37:18Z",
+    "host": "Darwin 25.6.0 arm64",
+    "endpoint": "http://127.0.0.1:5001/api/extra/perf",
+    "model": "qwen2.5-0.5b-instruct-q4_k_m",
+    "scenario": "after TWO generations completed but only ONE poll happened \u2014 total_gens advanced by 2, but last_* describes only the second request. Real regression case for the silent under-count this adapter previously had.",
+    "generation_usage": "{\"req1\": {\"prompt_tokens\": 12, \"completion_tokens\": 12, \"total_tokens\": 24}, \"req2\": {\"prompt_tokens\": 12, \"completion_tokens\": 8, \"total_tokens\": 20}}"
+  }
+}

@@ -1,0 +1,221 @@
+# HELP vllm_mlx_http_requests_total HTTP requests handled by the server.
+# TYPE vllm_mlx_http_requests_total counter
+vllm_mlx_http_requests_total{method="GET",path="/v1/models",status_code="200"} 15.0
+vllm_mlx_http_requests_total{method="POST",path="/v1/chat/completions",status_code="200"} 3.0
+vllm_mlx_http_requests_total{method="GET",path="/openapi.json",status_code="200"} 7.0
+vllm_mlx_http_requests_total{method="GET",path="__unmatched__",status_code="404"} 28.0
+# HELP vllm_mlx_http_requests_created HTTP requests handled by the server.
+# TYPE vllm_mlx_http_requests_created gauge
+vllm_mlx_http_requests_created{method="GET",path="/v1/models",status_code="200"} 1.789836269221622e+09
+vllm_mlx_http_requests_created{method="POST",path="/v1/chat/completions",status_code="200"} 1.789836277952458e+09
+vllm_mlx_http_requests_created{method="GET",path="/openapi.json",status_code="200"} 1.789836280232886e+09
+vllm_mlx_http_requests_created{method="GET",path="__unmatched__",status_code="404"} 1.789836280242676e+09
+# HELP vllm_mlx_http_request_duration_seconds HTTP request latency in seconds.
+# TYPE vllm_mlx_http_request_duration_seconds histogram
+vllm_mlx_http_request_duration_seconds_bucket{le="0.005",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.01",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.025",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.05",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.1",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.25",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.5",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="1.0",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="2.5",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="5.0",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="10.0",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="30.0",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_bucket{le="+Inf",method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_count{method="GET",path="/v1/models"} 15.0
+vllm_mlx_http_request_duration_seconds_sum{method="GET",path="/v1/models"} 0.006847167271189392
+vllm_mlx_http_request_duration_seconds_bucket{le="0.005",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.01",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.025",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.05",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.1",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.25",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.5",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="1.0",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="2.5",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="5.0",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="10.0",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="30.0",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_bucket{le="+Inf",method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_count{method="POST",path="/v1/chat/completions"} 3.0
+vllm_mlx_http_request_duration_seconds_sum{method="POST",path="/v1/chat/completions"} 0.0035356669686734676
+vllm_mlx_http_request_duration_seconds_bucket{le="0.005",method="GET",path="/openapi.json"} 6.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.01",method="GET",path="/openapi.json"} 6.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.025",method="GET",path="/openapi.json"} 6.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.05",method="GET",path="/openapi.json"} 6.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.1",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.25",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.5",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="1.0",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="2.5",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="5.0",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="10.0",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="30.0",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_bucket{le="+Inf",method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_count{method="GET",path="/openapi.json"} 7.0
+vllm_mlx_http_request_duration_seconds_sum{method="GET",path="/openapi.json"} 0.06302474997937679
+vllm_mlx_http_request_duration_seconds_bucket{le="0.005",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.01",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.025",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.05",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.1",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.25",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="0.5",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="1.0",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="2.5",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="5.0",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="10.0",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="30.0",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_bucket{le="+Inf",method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_count{method="GET",path="__unmatched__"} 28.0
+vllm_mlx_http_request_duration_seconds_sum{method="GET",path="__unmatched__"} 0.008291210164315999
+# HELP vllm_mlx_http_request_duration_seconds_created HTTP request latency in seconds.
+# TYPE vllm_mlx_http_request_duration_seconds_created gauge
+vllm_mlx_http_request_duration_seconds_created{method="GET",path="/v1/models"} 1.789836269221639e+09
+vllm_mlx_http_request_duration_seconds_created{method="POST",path="/v1/chat/completions"} 1.789836277952467e+09
+vllm_mlx_http_request_duration_seconds_created{method="GET",path="/openapi.json"} 1.789836280232896e+09
+vllm_mlx_http_request_duration_seconds_created{method="GET",path="__unmatched__"} 1.789836280242684e+09
+# HELP vllm_mlx_http_requests_in_flight HTTP requests currently in flight.
+# TYPE vllm_mlx_http_requests_in_flight gauge
+vllm_mlx_http_requests_in_flight{method="GET",path="/v1/models"} 0.0
+vllm_mlx_http_requests_in_flight{method="POST",path="/v1/chat/completions"} 0.0
+vllm_mlx_http_requests_in_flight{method="GET",path="/openapi.json"} 0.0
+vllm_mlx_http_requests_in_flight{method="GET",path="__unmatched__"} 0.0
+# HELP vllm_mlx_inference_requests_total Inference requests completed by endpoint.
+# TYPE vllm_mlx_inference_requests_total counter
+vllm_mlx_inference_requests_total{endpoint="chat_completions",result="success",stream="true"} 3.0
+# HELP vllm_mlx_inference_requests_created Inference requests completed by endpoint.
+# TYPE vllm_mlx_inference_requests_created gauge
+vllm_mlx_inference_requests_created{endpoint="chat_completions",result="success",stream="true"} 1.7898362895142999e+09
+# HELP vllm_mlx_inference_request_duration_seconds End-to-end inference latency in seconds.
+# TYPE vllm_mlx_inference_request_duration_seconds histogram
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="0.01",stream="true"} 0.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="0.025",stream="true"} 0.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="0.05",stream="true"} 0.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="0.1",stream="true"} 0.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="0.25",stream="true"} 1.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="0.5",stream="true"} 2.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="1.0",stream="true"} 2.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="2.5",stream="true"} 2.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="5.0",stream="true"} 2.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="10.0",stream="true"} 2.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="30.0",stream="true"} 3.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="60.0",stream="true"} 3.0
+vllm_mlx_inference_request_duration_seconds_bucket{endpoint="chat_completions",le="+Inf",stream="true"} 3.0
+vllm_mlx_inference_request_duration_seconds_count{endpoint="chat_completions",stream="true"} 3.0
+vllm_mlx_inference_request_duration_seconds_sum{endpoint="chat_completions",stream="true"} 12.00948666606564
+# HELP vllm_mlx_inference_request_duration_seconds_created End-to-end inference latency in seconds.
+# TYPE vllm_mlx_inference_request_duration_seconds_created gauge
+vllm_mlx_inference_request_duration_seconds_created{endpoint="chat_completions",stream="true"} 1.78983628951431e+09
+# HELP vllm_mlx_inference_ttft_seconds Time to first token for streaming endpoints.
+# TYPE vllm_mlx_inference_ttft_seconds histogram
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.005",stream="true"} 0.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.01",stream="true"} 0.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.025",stream="true"} 0.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.05",stream="true"} 0.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.1",stream="true"} 1.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.25",stream="true"} 2.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="0.5",stream="true"} 2.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="1.0",stream="true"} 2.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="2.5",stream="true"} 2.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="5.0",stream="true"} 2.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="10.0",stream="true"} 2.0
+vllm_mlx_inference_ttft_seconds_bucket{endpoint="chat_completions",le="+Inf",stream="true"} 3.0
+vllm_mlx_inference_ttft_seconds_count{endpoint="chat_completions",stream="true"} 3.0
+vllm_mlx_inference_ttft_seconds_sum{endpoint="chat_completions",stream="true"} 11.608042832114734
+# HELP vllm_mlx_inference_ttft_seconds_created Time to first token for streaming endpoints.
+# TYPE vllm_mlx_inference_ttft_seconds_created gauge
+vllm_mlx_inference_ttft_seconds_created{endpoint="chat_completions",stream="true"} 1.7898362893283641e+09
+# HELP vllm_mlx_prompt_tokens_total Prompt/input tokens processed by endpoint.
+# TYPE vllm_mlx_prompt_tokens_total counter
+vllm_mlx_prompt_tokens_total{endpoint="chat_completions",stream="true"} 105.0
+# HELP vllm_mlx_prompt_tokens_created Prompt/input tokens processed by endpoint.
+# TYPE vllm_mlx_prompt_tokens_created gauge
+vllm_mlx_prompt_tokens_created{endpoint="chat_completions",stream="true"} 1.789836289514325e+09
+# HELP vllm_mlx_completion_tokens_total Generated output tokens produced by endpoint.
+# TYPE vllm_mlx_completion_tokens_total counter
+vllm_mlx_completion_tokens_total{endpoint="chat_completions",stream="true"} 174.0
+# HELP vllm_mlx_completion_tokens_created Generated output tokens produced by endpoint.
+# TYPE vllm_mlx_completion_tokens_created gauge
+vllm_mlx_completion_tokens_created{endpoint="chat_completions",stream="true"} 1.789836289514328e+09
+# HELP vllm_mlx_embedding_truncated_total Embedding inputs silently truncated under the truncate overflow policy.
+# TYPE vllm_mlx_embedding_truncated_total counter
+# HELP vllm_mlx_model_loaded Whether a generation model is currently loaded.
+# TYPE vllm_mlx_model_loaded gauge
+vllm_mlx_model_loaded 1.0
+# HELP vllm_mlx_engine_type Current engine mode.
+# TYPE vllm_mlx_engine_type gauge
+vllm_mlx_engine_type{engine_type="simple"} 1.0
+vllm_mlx_engine_type{engine_type="batched"} 0.0
+vllm_mlx_engine_type{engine_type="unknown"} 0.0
+# HELP vllm_mlx_engine_is_mllm Whether the loaded engine is multimodal.
+# TYPE vllm_mlx_engine_is_mllm gauge
+vllm_mlx_engine_is_mllm 0.0
+# HELP vllm_mlx_scheduler_waiting_requests Requests currently waiting in the scheduler.
+# TYPE vllm_mlx_scheduler_waiting_requests gauge
+vllm_mlx_scheduler_waiting_requests 0.0
+# HELP vllm_mlx_scheduler_running_requests Requests currently running in the scheduler.
+# TYPE vllm_mlx_scheduler_running_requests gauge
+vllm_mlx_scheduler_running_requests 0.0
+# HELP vllm_mlx_engine_steps_executed Scheduler/engine steps executed since startup.
+# TYPE vllm_mlx_engine_steps_executed gauge
+vllm_mlx_engine_steps_executed 0.0
+# HELP vllm_mlx_engine_uptime_seconds Engine uptime in seconds.
+# TYPE vllm_mlx_engine_uptime_seconds gauge
+vllm_mlx_engine_uptime_seconds 139.4374430179596
+# HELP vllm_mlx_metal_memory_bytes Metal memory usage in bytes.
+# TYPE vllm_mlx_metal_memory_bytes gauge
+vllm_mlx_metal_memory_bytes{kind="active"} 2.8e+08
+vllm_mlx_metal_memory_bytes{kind="peak"} 3.4e+08
+vllm_mlx_metal_memory_bytes{kind="cache"} 2e+07
+# HELP vllm_mlx_cache_type Current active cache backend.
+# TYPE vllm_mlx_cache_type gauge
+vllm_mlx_cache_type{cache_type="none"} 1.0
+vllm_mlx_cache_type{cache_type="prefix_cache"} 0.0
+vllm_mlx_cache_type{cache_type="memory_aware_cache"} 0.0
+vllm_mlx_cache_type{cache_type="paged_cache"} 0.0
+# HELP vllm_mlx_cache_entry_count Cache entries or allocated blocks, depending on cache type.
+# TYPE vllm_mlx_cache_entry_count gauge
+vllm_mlx_cache_entry_count 0.0
+# HELP vllm_mlx_cache_hits Cache hits since startup/reset.
+# TYPE vllm_mlx_cache_hits gauge
+vllm_mlx_cache_hits 0.0
+# HELP vllm_mlx_cache_misses Cache misses since startup/reset.
+# TYPE vllm_mlx_cache_misses gauge
+vllm_mlx_cache_misses 0.0
+# HELP vllm_mlx_cache_evictions Cache evictions since startup/reset.
+# TYPE vllm_mlx_cache_evictions gauge
+vllm_mlx_cache_evictions 0.0
+# HELP vllm_mlx_cache_hit_rate Cache hit rate.
+# TYPE vllm_mlx_cache_hit_rate gauge
+vllm_mlx_cache_hit_rate 0.0
+# HELP vllm_mlx_cache_utilization_ratio Cache utilization ratio.
+# TYPE vllm_mlx_cache_utilization_ratio gauge
+vllm_mlx_cache_utilization_ratio 0.0
+# HELP vllm_mlx_cache_memory_bytes Cache memory usage in bytes.
+# TYPE vllm_mlx_cache_memory_bytes gauge
+vllm_mlx_cache_memory_bytes 0.0
+# HELP vllm_mlx_cache_memory_limit_bytes Cache memory limit in bytes when available.
+# TYPE vllm_mlx_cache_memory_limit_bytes gauge
+vllm_mlx_cache_memory_limit_bytes 0.0
+# HELP vllm_mlx_cache_tokens_saved Prompt tokens saved by cache reuse since startup/reset.
+# TYPE vllm_mlx_cache_tokens_saved gauge
+vllm_mlx_cache_tokens_saved 0.0
+# HELP vllm_mlx_model_registry_entries Tracked model ownership entries.
+# TYPE vllm_mlx_model_registry_entries gauge
+vllm_mlx_model_registry_entries 0.0
+# HELP vllm_mlx_model_registry_active_owners Active model owners in the registry.
+# TYPE vllm_mlx_model_registry_active_owners gauge
+vllm_mlx_model_registry_active_owners 0.0
+# HELP vllm_mlx_mcp_connected_servers Connected MCP servers.
+# TYPE vllm_mlx_mcp_connected_servers gauge
+vllm_mlx_mcp_connected_servers 0.0
+# HELP vllm_mlx_mcp_total_servers Configured MCP servers.
+# TYPE vllm_mlx_mcp_total_servers gauge
+vllm_mlx_mcp_total_servers 0.0
+# HELP vllm_mlx_mcp_tools_available Available MCP tools.
+# TYPE vllm_mlx_mcp_tools_available gauge
+vllm_mlx_mcp_tools_available 0.0

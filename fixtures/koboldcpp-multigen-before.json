@@ -1,0 +1,33 @@
+{
+  "last_process": 4.285714149475098,
+  "last_eval": 11.0,
+  "last_token_count": 3,
+  "last_input_count": 12,
+  "last_process_time": 0.051428569793701175,
+  "last_eval_time": 0.033,
+  "last_process_speed": 233.33334075080046,
+  "last_eval_speed": 90.9090909090909,
+  "last_seed": 936557,
+  "last_draft_success": 0,
+  "last_draft_failed": 0,
+  "total_gens": 2,
+  "stop_reason": 1,
+  "total_img_gens": 0,
+  "total_tts_gens": 0,
+  "total_transcribe_gens": 0,
+  "queue": 0,
+  "idle": 1,
+  "hordeexitcounter": -1,
+  "uptime": 101.65634727478027,
+  "idletime": 80.50921535491943,
+  "quiet": true,
+  "_provenance": {
+    "note": "LIVE CAPTURE \u2014 real response from a running KoboldCpp server, not hand-written.",
+    "captured": "2026-09-20T20:37:18Z",
+    "host": "Darwin 25.6.0 arm64",
+    "endpoint": "http://127.0.0.1:5001/api/extra/perf",
+    "model": "qwen2.5-0.5b-instruct-q4_k_m",
+    "scenario": "server state before two generations fired back-to-back with only one poll after both",
+    "generation_usage": null
+  }
+}
