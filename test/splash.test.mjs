@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { parseSplashSample, diffSplashSamples } from "../adapters/splash.ts"
+import { parseSplashSample, diffSplashSamples, formatSplashLine } from "../adapters/splash.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const fixture = (name) => readFileSync(path.join(dir, "..", "fixtures", name), "utf8")
@@ -161,6 +161,69 @@ test("Splash: a near-zero phase yields no rate rather than an absurd one", () =>
 test("Splash: another engine's metrics text is rejected", () => {
   assert.equal(parseSplashSample("vllm:generation_tokens_total 10.0\n"), null)
   assert.equal(parseSplashSample(""), null)
+})
+
+// ---- rendering: formatSplashLine -------------------------------------------
+// Extracted from the v1 entry file, where it was inline and therefore
+// untested. Splash draws the richest line here, so it has the most ways to
+// render something indefensible.
+
+test("Splash: renders the full line from a real captured turn", () => {
+  const t = diffSplashSamples(
+    parseSplashSample(fixture("splash-before.prom")),
+    parseSplashSample(fixture("splash-after.prom"))
+  )
+  const out = formatSplashLine(t, "incoai/Qwen3.8-27B-Splash").split("\n")
+  assert.ok(out[0].startsWith("Splash  "), out[0])
+  // Every line must be a real figure; a "?" means a caller should have
+  // dropped the line instead of printing it.
+  assert.ok(!out.some((l) => l.includes("?")), out.join(" | "))
+})
+
+test("Splash: the prompt line sums prefilled and cached, not just prefilled", () => {
+  // This is the honesty guarantee for Splash specifically: its prefill
+  // counter deliberately excludes cache hits, so showing only promptTokens
+  // would under-report the prompt the caller actually sent.
+  const t = diffSplashSamples(
+    parseSplashSample(fixture("splash-cached-before.prom")),
+    parseSplashSample(fixture("splash-cached-after.prom"))
+  )
+  const out = formatSplashLine(t, "m")
+  const total = t.promptTokens + t.cachedTokens
+  assert.ok(out.includes(`${total} prompt`), `expected ${total} prompt in: ${out}`)
+})
+
+test("Splash: cached is named only when some was actually reused", () => {
+  const cold = { completionTokens: 200, promptTokens: 63, cachedTokens: 0,
+    decodeS: 5, prefillS: 0.27, decodeTokS: 40, prefillTokS: 233, requests: 1 }
+  assert.ok(!formatSplashLine(cold, "m").includes("cached"), "cold prompt must not mention cache")
+  const warm = { ...cold, promptTokens: 31, cachedTokens: 32 }
+  assert.ok(formatSplashLine(warm, "m").includes("32 cached"), "a real cache hit must be named")
+})
+
+test("Splash: an absent rate is omitted, never rendered as a placeholder", () => {
+  const t = { completionTokens: 200, promptTokens: 63, cachedTokens: 0,
+    decodeS: 0, prefillS: 0, decodeTokS: undefined, prefillTokS: undefined, requests: 1 }
+  const out = formatSplashLine(t, "m")
+  assert.ok(!out.includes("?"), out)
+  assert.ok(!out.includes("tok/s"), "no rate should appear at all")
+  assert.ok(out.includes("200 tok"), "the token count still survives")
+})
+
+test("Splash: no speculation means no accept line, not 0% accepted", () => {
+  const t = { completionTokens: 200, promptTokens: 63, cachedTokens: 0,
+    decodeS: 5, prefillS: 0.27, decodeTokS: 40, prefillTokS: 233,
+    draftAcceptRate: undefined, requests: 1 }
+  assert.ok(!formatSplashLine(t, "m").includes("draft"), "absent is not zero")
+  assert.ok(formatSplashLine({ ...t, draftAcceptRate: 0.81 }, "m").includes("draft 81% accepted"))
+})
+
+test("Splash: a multi-request turn is labelled so sums are not misread", () => {
+  const one = { completionTokens: 200, promptTokens: 63, cachedTokens: 0,
+    decodeS: 5, prefillS: 0.27, decodeTokS: 40, prefillTokS: 233, requests: 1 }
+  assert.ok(!formatSplashLine(one, "m").includes("requests this turn"))
+  const many = { ...one, requests: 3, completionTokens: 600 }
+  assert.ok(formatSplashLine(many, "m").includes("3 requests this turn"))
 })
 
 console.log(`\n${passed} passed`)
