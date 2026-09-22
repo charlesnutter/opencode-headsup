@@ -85,4 +85,39 @@ test("TTFT comes from the first delta, not from completion", () => {
   assert.ok(Math.abs(turnRate(1247, splashInfo, splashTurn).ttft - 0.66) < 0.001)
 })
 
+// ---- the rate is named for the window it measured ---------------------------
+// A live run showed our 38.2 tok/s beside OpenCode's own 3.7 tok/s for the
+// same turn. Both were right: 37 tokens over a 0.97s decode window vs over
+// 10.03s total. Unlabelled, they read as a contradiction.
+
+test("a streamed turn names its rate decode, not overall", () => {
+  const info = { time: { created: 1000, completed: 11030 }, tokens: { input: 0, output: 37, reasoning: 0, cache: { read: 0, write: 0 } } }
+  const turn = { firstAt: 10060, lastAt: 11030 }
+  const r = turnRate(37, info, turn)
+  assert.equal(r.rateWindow, "decode")
+  // 37 tokens over the 0.97s stream window, not the 10.03s total.
+  assert.ok(Math.abs(r.decodeTokS - 38.1) < 0.5, String(r.decodeTokS))
+  assert.ok(universalLine("mtplx", "m", info, turn).includes("decode "))
+})
+
+test("with no stream window, the rate is named overall instead", () => {
+  const info = { time: { created: 1000, completed: 11030 }, tokens: { input: 0, output: 37, reasoning: 0, cache: { read: 0, write: 0 } } }
+  const r = turnRate(37, info, undefined)
+  assert.equal(r.rateWindow, "whole")
+  // 37 over the full 10.03s — a different number entirely, so it must not
+  // claim to be a decode rate.
+  assert.ok(Math.abs(r.decodeTokS - 3.7) < 0.1, String(r.decodeTokS))
+  assert.ok(universalLine("mtplx", "m", info, undefined).includes("overall "))
+})
+
+test("ttft falls back to the message's created, not only turn.startAt", () => {
+  // The v2 entry has no event carrying the request start, so requiring
+  // startAt silently produced no ttft at all for every provider without an
+  // adapter. `created` is the request start and is always present.
+  const info = { time: { created: 1000, completed: 11030 }, tokens: { input: 0, output: 37, reasoning: 0, cache: { read: 0, write: 0 } } }
+  const r = turnRate(37, info, { firstAt: 10060, lastAt: 11030 })
+  assert.ok(r.ttft !== undefined, "ttft must not require startAt")
+  assert.ok(Math.abs(r.ttft - 9.06) < 0.01, String(r.ttft))
+})
+
 console.log(`\n${passed} passed`)

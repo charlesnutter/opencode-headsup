@@ -104,7 +104,7 @@ export function diffLlamaCppCounters(
 export function formatLlamaCppLine(t: LlamaCppTurn, label: string, model: string): string {
   return [
     `${label}  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : "",
+    t.decodeTokS !== undefined ? `decode ${nn(t.decodeTokS)} tok/s` : "",
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(t.decodeS + t.prefillS, 2)}s`,
   ]

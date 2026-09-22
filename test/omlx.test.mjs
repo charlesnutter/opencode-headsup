@@ -89,7 +89,7 @@ test("one real request recovers the exact rate the server measured", () => {
   // recoverLatest(0,0,80,1) = 80*1 - 0*0 = 80 exactly.
   const out = formatOmlxLine(afterOne, before).split("\n")
   assert.equal(out.length, 4, out.join(" | "))
-  assert.equal(out[1], "80.0 tok/s")
+  assert.equal(out[1], "decode 80.0 tok/s")
   assert.equal(out[2], "prefill 72 tok/s")
   assert.ok(!out.some((l) => l.includes("avg")), "a single recovered request carries no avg label")
 })
@@ -105,7 +105,7 @@ test("two real requests in one window fall back to the lifetime average, labelle
   // 3 - 1 = 2 new requests: recovery refuses, so this exercises the fallback
   // this fixture pair exists for.
   const out = formatOmlxLine(afterTwo, afterOne).split("\n")
-  assert.equal(out[1], "70.9 tok/s (avg)", out.join(" | "))
+  assert.equal(out[1], "decode 70.9 tok/s (avg)", out.join(" | "))
   assert.equal(out[2], "prefill 66 tok/s (avg)")
 })
 

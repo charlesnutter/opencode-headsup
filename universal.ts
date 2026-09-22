@@ -28,22 +28,45 @@ export interface Turn {
  * from prefill, which nothing here does, but OpenCode's own event stream
  * already has it for free.
  */
-export function turnRate(tokens: number, info: SessionMessageAssistant | undefined, turn?: Turn): { decodeTokS?: number; ttft?: number; total?: number } {
+export function turnRate(
+  tokens: number,
+  info: SessionMessageAssistant | undefined,
+  turn?: Turn
+): { decodeTokS?: number; ttft?: number; total?: number; rateWindow?: "decode" | "whole" } {
   const created = info?.time?.created
   const completed = info?.time?.completed
   const total = typeof created === "number" && typeof completed === "number" ? (completed - created) / 1000 : undefined
 
   let ttft: number | undefined
   let decodeTokS: number | undefined
+  let rateWindow: "decode" | "whole" | undefined
+
+  // The request start. `turn.startAt` if a caller recorded one, otherwise the
+  // message's own `created` — which is what it means anyway. Falling back here
+  // rather than requiring startAt is deliberate: the v2 entry had no event
+  // carrying the request start, so requiring it silently produced no ttft at
+  // all for every provider without an adapter.
+  const start = turn?.startAt ?? created
+
   if (turn) {
-    if (turn.firstAt && turn.startAt) ttft = (turn.firstAt - turn.startAt) / 1000
-    if (turn.firstAt && turn.lastAt && turn.lastAt > turn.firstAt && tokens > 0) {
+    if (turn.firstAt !== undefined && typeof start === "number") {
+      ttft = (turn.firstAt - start) / 1000
+    }
+    if (turn.firstAt !== undefined && turn.lastAt !== undefined && turn.lastAt > turn.firstAt && tokens > 0) {
       decodeTokS = tokens / ((turn.lastAt - turn.firstAt) / 1000)
+      rateWindow = "decode"
     }
   }
-  // Fall back to whole-request rate if the stream window was too short to time.
-  if (decodeTokS === undefined && tokens > 0 && total && total > 0) decodeTokS = tokens / total
-  return { decodeTokS, ttft, total }
+  // Fall back to a whole-request rate when the stream window was too short to
+  // time. `rateWindow` says which one this is, because the two differ by an
+  // order of magnitude on a turn with a long wait before the first token
+  // (measured: 38.1 tok/s over a 0.97s decode window vs 3.7 over 10.03s
+  // total) and presenting either as the other is indefensible.
+  if (decodeTokS === undefined && tokens > 0 && total !== undefined && total > 0) {
+    decodeTokS = tokens / total
+    rateWindow = "whole"
+  }
+  return { decodeTokS, ttft, total, rateWindow }
 }
 
 export function universalLine(
@@ -61,11 +84,15 @@ export function universalLine(
   // 1247 generated tokens were reasoning, and this line reported 11.4 tok/s
   // where the engine's own log said 39.7 over the same 31.4s window.
   const generated = out + reason
-  const { decodeTokS, ttft, total } = turnRate(generated, info, turn)
+  const { decodeTokS, ttft, total, rateWindow } = turnRate(generated, info, turn)
 
+  // Named for the window it actually measured. OpenCode's own status line
+  // shows a whole-turn rate, so an unlabelled figure here reads as
+  // contradicting it when it is in fact a decode rate over a shorter window.
+  const rateName = rateWindow === "whole" ? "overall" : "decode"
   const rate =
     decodeTokS !== undefined
-      ? `${nn(decodeTokS)} tok/s${ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""}`
+      ? `${rateName} ${nn(decodeTokS)} tok/s${ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""}`
       : ttft !== undefined
         ? `ttft ${nn(ttft, 2)}s`
         : ""

@@ -223,7 +223,7 @@ export function formatMlxServeLine(t: MlxServeTurn, model: string): string {
   // so the whole-request one is labelled rather than shown as a decode rate.
   const rate =
     t.decodeTokS !== undefined
-      ? `${nn(t.decodeTokS)} tok/s${t.ttft !== undefined ? `  ttft ${nn(t.ttft, 2)}s` : ""}`
+      ? `decode ${nn(t.decodeTokS)} tok/s${t.ttft !== undefined ? `  ttft ${nn(t.ttft, 2)}s` : ""}`
       : t.overallTokS !== undefined
         ? `${nn(t.overallTokS)} tok/s (whole request)`
         : ""

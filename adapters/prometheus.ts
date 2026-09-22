@@ -281,15 +281,20 @@ export function formatPromLine(
   diff: PromDiff,
   label: string,
   model: string,
-  fallback: { decodeTokS?: number; total?: number }
+  fallback: { decodeTokS?: number; total?: number; rateWindow?: "decode" | "whole" }
 ): string {
   const decodeTokS = diff.decodeTokS ?? fallback.decodeTokS
+  // The engine's own figure is always a decode phase. The fallback may be a
+  // whole-turn rate, which differs from a decode rate by ~10x on a turn with
+  // a long wait before the first token — so it is named for what it measures
+  // rather than assumed to be decode.
+  const rateName = diff.decodeTokS !== undefined || fallback.rateWindow === "decode" ? "decode" : "overall"
   const total = diff.durationS ?? fallback.total
   const ttftLabel =
     diff.ttft !== undefined ? `  ttft ${nn(diff.ttft, 2)}s${diff.ttftExact ? "" : " (avg)"}` : ""
   return [
     `${label}  ${short(model)}`,
-    decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
+    decodeTokS !== undefined ? `${rateName} ${nn(decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
     diff.prefillTokS !== undefined ? `prefill ${ni(diff.prefillTokS)} tok/s` : "",
     `${ni(diff.completionTokens)} tok  (${ni(diff.promptTokens)} prompt${
       diff.cachedTokens > 0 ? `, ${ni(diff.cachedTokens)} cached` : ""
