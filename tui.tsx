@@ -284,6 +284,14 @@ export default Plugin.define({
         }
         const diff = diffPromSamples(prev, now)
         if (!diff) return null
+        // Measures how often a window holds more than one request (audit §4
+        // correction). The engine's token delta exceeding the host's own
+        // count for this turn is the direct sign another request landed.
+        const hostTok = (info.tokens?.output ?? 0) + (info.tokens?.reasoning ?? 0)
+        dbg(
+          `${id} window: ${diff.ttftExact ? "1 request" : "requests≠1"}; ` +
+            `engine ${diff.completionTokens} tok vs host ${hostTok} tok`
+        )
         // Tier 1 supplies the fallback rate for engines with no duration
         // histogram. Passed in rather than imported by the adapter, so
         // adapters stay leaves.
