@@ -1,4 +1,3 @@
-/** @jsxImportSource @opentui/solid */
 // Phase 0 probe. Not the plugin — a disposable instrument that answers P1-P3
 // (and the live half of P4/P5) by logging what the v2 runtime actually does,
 // rather than what its type definitions imply.
@@ -208,32 +207,12 @@ export default Plugin.define({
       }
     }
 
-    // ---- P3: which slots render, what do they receive, where do they clip?
-    // Eight numbered lines: whichever number is last visible is the clip
-    // point. v1's footer clipped past roughly five.
-    const probeLines = (where: string, input: unknown) => {
-      log(`P3.${where}.render`, input)
-      return (
-        <text>
-          {`${where} 1/8\n${where} 2/8\n${where} 3/8\n${where} 4/8\n` +
-            `${where} 5/8\n${where} 6/8\n${where} 7/8\n${where} 8/8`}
-        </text>
-      )
-    }
-
-    for (const path of ["sidebar.footer", "sidebar.content", "prompt.footer.status"] as const) {
-      try {
-        off.push(
-          ctx.ui.slot({
-            append: path,
-            render: (input: unknown) => probeLines(path, input),
-          } as Parameters<typeof ctx.ui.slot>[0])
-        )
-        log("P3.claimed", path)
-      } catch (e) {
-        log("P3.claim.threw", { path, error: String(e) })
-      }
-    }
+    // ---- P3: answered, claims removed -----------------------------------
+    // Three slots were claimed here rendering numbered 8-line blocks, to
+    // find each one's clip point. All three rendered all eight lines, so
+    // there is no clipping to measure and the blocks were only clutter in
+    // a live UI. Result is recorded in .agents/audit.md; the probe now
+    // renders nothing and only listens.
 
     log("boot.complete", { subscriptions: off.length })
 
