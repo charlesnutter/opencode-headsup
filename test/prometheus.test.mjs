@@ -304,17 +304,53 @@ test("vLLM keeps no prefill rate (it times no prefill phase)", () => {
 
 const NO_FALLBACK = { decodeTokS: undefined, total: undefined }
 
-test("Prometheus: an averaged TTFT is labelled (avg), never shown bare", () => {
-  // The whole point of ttftExact. A histogram mean over however many requests
-  // landed in the window, presented as this turn's TTFT, is the single most
-  // misleading thing this adapter could render.
+// A window holding anything other than exactly one request is declined
+// outright. Every figure in it -- tokens, prompt, cached, duration -- is a sum
+// or mean over requests this turn cannot be separated from, and no engine
+// here labels a series by request or session. Measured on vllm-mlx: a
+// 46-token answer shared its window with an interrupted runaway turn and
+// rendered `116135.1 tok/s  ttft 0.36s (avg)` over `8594 tok (26264
+// prompt) 5.35s`. Only the ttft was labelled. The caller falls back to the
+// universal line, which describes this turn alone.
+
+test("Prometheus: a window holding several requests renders nothing", () => {
   const diff = { completionTokens: 50, promptTokens: 33, cachedTokens: 0,
     ttft: 0.31, ttftExact: false, decodeTokS: 40 }
-  const out = formatPromLine(diff, "vLLM", "m", NO_FALLBACK)
-  assert.ok(out.includes("ttft 0.31s (avg)"), out)
+  assert.equal(formatPromLine(diff, "vLLM", "m", NO_FALLBACK), null)
 })
 
-test("Prometheus: an exact TTFT carries no (avg) qualifier", () => {
+test("Prometheus: the measured 8594-vs-46 window is declined, not rendered", () => {
+  // The real shape: vllm-mlx, three requests' first tokens in the window,
+  // 8594 generated tokens, while OpenCode's own turn was 46 tokens. The
+  // fallback rate is what the old line printed.
+  const before = parsePromSample(fixture("vllm-mlx-idle.prom"), VLLM_MLX_SPEC)
+  const now = {
+    ...before,
+    generation: before.generation + 8594,
+    prompt: before.prompt + 26264,
+    ttftCount: before.ttftCount + 3,
+    ttftSum: before.ttftSum + 1.08,
+    durationCount: before.durationCount + 3,
+    durationSum: before.durationSum + 16.05,
+  }
+  const diff = diffPromSamples(before, now)
+  assert.equal(diff.ttftExact, false)
+  const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 116135.1, total: 44.6, rateWindow: "decode" })
+  assert.equal(out, null, `must not render window-wide figures as this turn's:\n${out}`)
+})
+
+test("Prometheus: a window where no request started is declined too", () => {
+  // Tokens arrived but no first token did: the tail of a request that began
+  // in an earlier window, e.g. a turn interrupted and still generating.
+  // They are not this turn's, whatever the host says.
+  const before = parsePromSample(fixture("vllm-mlx-idle.prom"), VLLM_MLX_SPEC)
+  const now = { ...before, generation: before.generation + 300 }
+  const diff = diffPromSamples(before, now)
+  assert.equal(diff.ttftExact, false)
+  assert.equal(formatPromLine(diff, "vllm-mlx", "m", NO_FALLBACK), null)
+})
+
+test("Prometheus: an exact TTFT is shown bare", () => {
   const diff = { completionTokens: 50, promptTokens: 33, cachedTokens: 0,
     ttft: 0.31, ttftExact: true, decodeTokS: 40 }
   const out = formatPromLine(diff, "vllm-mlx", "m", NO_FALLBACK)

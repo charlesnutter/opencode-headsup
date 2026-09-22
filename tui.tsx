@@ -255,8 +255,12 @@ export default Plugin.define({
        * complete and correct, it simply is not the engine's own. Without
        * saying so, the figures change shape on turn two and the rate can move
        * by an order of magnitude, which reads as a bug.
+       *
+       * `sharedWindow` is the same idea for a Prometheus window that held
+       * other requests besides this turn: the engine figures were declined
+       * as unattributable, and the line should say why they are missing.
        */
-      tier2: { pendingBaseline: boolean }
+      tier2: { pendingBaseline: boolean; sharedWindow: boolean }
     ): Promise<string | null> {
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
@@ -295,7 +299,9 @@ export default Plugin.define({
         // Tier 1 supplies the fallback rate for engines with no duration
         // histogram. Passed in rather than imported by the adapter, so
         // adapters stay leaves.
-        return formatPromLine(diff, label, model, turnRate(diff.completionTokens, info, turn))
+        const line = formatPromLine(diff, label, model, turnRate(diff.completionTokens, info, turn))
+        if (line === null) tier2.sharedWindow = true
+        return line
       }
 
       switch (provider) {
@@ -455,7 +461,7 @@ export default Plugin.define({
       // them all at once rather than leaving them to run the clock out.
       const http: HttpOptions = { signal: life.signal }
 
-      const tier2 = { pendingBaseline: false }
+      const tier2 = { pendingBaseline: false, sharedWindow: false }
       let line: string | null = null
       try {
         line = await enrich(provider, model, info, turn, http, tier2)
@@ -484,6 +490,7 @@ export default Plugin.define({
         // baseline exists, and the rate in particular can move an order of
         // magnitude when it does.
         if (tier2.pendingBaseline) line += "\nengine telemetry from the next turn"
+        else if (tier2.sharedWindow) line += "\nengine data skipped: overlapping requests"
       }
 
       // Keep the turn for the drill-down. `source` is the epistemics: an

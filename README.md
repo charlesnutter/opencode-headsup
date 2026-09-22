@@ -298,8 +298,7 @@ streamed turn.
 Default port 8000. On Apple Silicon,
 [vllm-metal](https://github.com/vllm-project/vllm-metal) runs upstream vLLM
 unchanged. Decode rate reuses OpenCode's turn timing — there is no
-per-request duration histogram. TTFT is engine-reported but is a window
-average, labelled `(avg)`.
+per-request duration histogram. TTFT is engine-reported.
 
 <a id="sglang"></a>
 
@@ -402,6 +401,15 @@ expected — `session.usage.updated`, `session.cost()`, raw engine
 counters, and `time.streamed` (which is stamped at the *end* of the
 stream, not the start, and is therefore not a TTFT). The per-turn
 figures here are differenced or measured accordingly.
+
+A counter difference is only one turn's when exactly one request reached
+the engine between the two readings. OpenCode's own background work (a new
+session's title, compaction), a turn you interrupted that kept generating,
+or another tab or client sharing the server all break that, and no engine
+here labels its counters by request or session to separate them again. So
+for the Prometheus engines, a turn that shared its window shows the
+universal line with `engine data skipped: overlapping requests` rather than
+figures that describe several requests at once.
 
 ### Absent is not zero
 

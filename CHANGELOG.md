@@ -1,3 +1,12 @@
+## [Unreleased]
+### Fixed
+- `vllm`, `sglang`, `vllmmlx`, `aphrodite` and `lmdeploy` rendered figures
+  for several requests as one turn's whenever other requests reached the
+  engine in the same window — a new session's title, an interrupted turn, a
+  second tab. Measured: a 46-token answer showed `116135.1 tok/s` over
+  `8594 tok`. Such a turn now shows the universal line with
+  `engine data skipped: overlapping requests`.
+
 ## [0.2.1] – 2026-09-22
 ### Fixed
 - The plugin crashed on load with `ctx.storage.memory is not a function` when

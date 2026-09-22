@@ -272,17 +272,21 @@ export function diffPromSamples(prev: PromSample, now: PromSample): PromDiff | n
  * `fallback` supplies OpenCode's own turn timing for engines that publish no
  * duration histogram (vLLM, Aphrodite). Where the engine does publish one,
  * its measured decode rate wins, because it excludes prefill and ours cannot.
- * `ttftExact` false means the figure is a histogram average over however many
- * requests landed in the window, and is labelled `(avg)` to say so — an
- * unlabelled window average presented as this turn's ttft is the mistake this
- * argument exists to prevent.
+ * Returns null unless exactly one request landed in the window
+ * (`ttftExact`). Otherwise every figure here is a sum or mean over requests
+ * this turn cannot be separated from — no engine labels a series by request
+ * or session — and the caller falls back to the universal line. Measured: a
+ * 46-token answer sharing a window with an interrupted runaway turn rendered
+ * `116135.1 tok/s` over `8594 tok`. Labelling only the ttft `(avg)`, as this
+ * once did, left every other figure passing as the turn's own.
  */
 export function formatPromLine(
   diff: PromDiff,
   label: string,
   model: string,
   fallback: { decodeTokS?: number; total?: number; rateWindow?: "decode" | "whole" }
-): string {
+): string | null {
+  if (!diff.ttftExact) return null
   const decodeTokS = diff.decodeTokS ?? fallback.decodeTokS
   // The engine's own figure is a decode phase and needs no qualifier — the
   // ttft beside it explains the rest of the turn. A whole-turn FALLBACK is
@@ -292,7 +296,7 @@ export function formatPromLine(
   const overall = isDecode ? "" : " overall"
   const total = diff.durationS ?? fallback.total
   const ttftLabel =
-    diff.ttft !== undefined ? `  ttft ${nn(diff.ttft, 2)}s${diff.ttftExact ? "" : " (avg)"}` : ""
+    diff.ttft !== undefined ? `  ttft ${nn(diff.ttft, 2)}s` : ""
   return [
     `${label}  ${short(model)}`,
     decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}` : ttftLabel.trim(),
