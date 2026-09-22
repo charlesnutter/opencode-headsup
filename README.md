@@ -223,8 +223,22 @@ Default port 8000, nothing to enable. Apple Silicon only.
 
 ```bash
 splash serve --model <owner/repo>
-splash opencode
+splash opencode --standalone
 ```
+
+`--standalone` is required on OpenCode 2. `splash opencode` injects its
+provider through `OPENCODE_CONFIG_CONTENT`, which only the process that
+loads config reads — and v2 runs a persistent background server that the TUI
+merely connects to. Without a private server the variable never reaches the
+process that would act on it, so Splash is not registered as a provider at
+all and OpenCode silently opens on whatever model it already had. Reported
+upstream.
+
+Port 8000 is also `vllm`'s and `vllmmlx`'s default here. If you run more
+than one of them, give Splash its own port with `splash serve --port`, and
+set `splashBaseUrl` to match — otherwise whichever server is listening
+answers for whichever provider you pick, and you get a confusing `model not
+found` rather than a connection error.
 
 Both phases are engine-timed, and prefill stays honest on a cache hit — it
 counts only recomputed tokens, never the whole prompt.
