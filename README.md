@@ -122,7 +122,7 @@ For local engines, the provider id in `opencode.json` must **exactly
 match** the provider ids below, otherwise no data will be passed to the
 plugin.
 
-| Provider | tok/s | TTFT | Prefill | Exact tokens | Cache | Extras | First turn | Validated |
+| Provider | tok/s | TTFT | Prefill tok/s | Exact tokens | Cache info | Extras | First turn | Validated |
 |---|---|---|---|---|---|---|---|---|
 | [`mtplx`](#mtplx) | ✅ | ✅ | ✅ | ✅ | ❌ | MTP accept % | ✅ | live |
 | [`omlx`](#omlx) | ✅ | 🟡 | ✅ | ✅ | ✅ | — | ✅ | live |
