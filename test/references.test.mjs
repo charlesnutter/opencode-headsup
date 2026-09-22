@@ -172,4 +172,42 @@ test("tui.tsx: the keymap layer is owned by the app slot, not the sidebar", () =
     "createRoot cannot own the layer -- the host's Keymap context is not reachable from it")
 })
 
+// ---- the package must expose a TUI entrypoint and NOTHING else ---------------
+// Shipped broken in 0.2.0. OpenCode loads a plugin twice, once per process,
+// and picks the entrypoint per kind (packages/opencode/src/plugin/shared.ts,
+// resolvePackageEntrypoint):
+//
+//   exports["./<kind>"]        -> used when present
+//   kind === "server" only     -> falls back to package.json "main"
+//
+// We had "main": "./tui.tsx", so the SERVER resolved our TUI plugin and ran
+// setup() against a server Context, where the TUI-only APIs do not exist:
+//
+//   TypeError: ctx.storage.memory is not a function   (Server plugin error)
+//
+// No entrypoint for a kind is a supported state -- the loader skips that
+// process. So the fix is to expose `./tui` and nothing the server can reach.
+// Types could not catch this and neither could any runtime test here: the
+// failure lives in package metadata, in a process this suite never starts.
+test("package.json exposes ./tui only, and no server entrypoint", () => {
+  const pkg = JSON.parse(read("package.json"))
+
+  assert.equal(pkg.exports?.["./tui"], "./tui.tsx", "the TUI entrypoint must stay declared")
+  assert.equal(
+    pkg.main,
+    undefined,
+    'package.json "main" makes the SERVER load tui.tsx and crash on ctx.storage.memory'
+  )
+  assert.equal(
+    pkg.exports?.["./server"],
+    undefined,
+    "this plugin has no server half; declaring one would load tui.tsx there"
+  )
+  assert.equal(
+    pkg.exports?.["."],
+    undefined,
+    "a bare entrypoint invites the same mistake for other tooling"
+  )
+})
+
 console.log(`\n${passed} passed`)

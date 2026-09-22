@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@banburist/opencode-headsup",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Live inference telemetry pinned to the OpenCode 2 sidebar.",
   "license": "MIT",
   "author": "charlesnutter",
@@ -11,7 +11,6 @@
   },
   "type": "module",
   "exports": {
-    ".": "./tui.tsx",
     "./tui": "./tui.tsx"
   },
   "devDependencies": {
@@ -28,7 +27,6 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && bun test/format.test.mjs && bun test/http.test.mjs && bun test/prometheus-text.test.mjs && bun test/universal.test.mjs && bun test/mtplx.test.mjs && bun test/omlx.test.mjs && bun test/llamacpp.test.mjs && bun test/prometheus.test.mjs && bun test/koboldcpp.test.mjs && bun test/splash.test.mjs && bun test/mlxserve.test.mjs && bun test/history.test.mjs && bun test/references.test.mjs"
   },
-  "main": "./tui.tsx",
   "files": [
     "tui.tsx",
     "format.ts",

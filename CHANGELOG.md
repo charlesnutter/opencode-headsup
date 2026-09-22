@@ -1,3 +1,11 @@
+## [0.2.1] – 2026-09-22
+### Fixed
+- The plugin crashed on load with `ctx.storage.memory is not a function` when
+  installed from npm. `package.json` carried a `main` field, which OpenCode's
+  loader falls back to for the **server** process, so a TUI-only plugin was
+  being started there. It now exposes `./tui` and nothing else, and the server
+  skips it.
+
 ## [0.2.0] – 2026-09-22
 ### Added
 - TTFT for `omlx`, `llamacpp`, `llamafile`, `splash` and `koboldcpp`, which
