@@ -168,6 +168,18 @@ export default Plugin.define({
     const off: Array<() => void> = []
     const cfg = readConfig(ctx.options)
 
+    // Cancels every in-flight engine fetch when this plugin goes away.
+    //
+    // v1 passed `api.lifecycle.signal` for this; v2's Context has no
+    // equivalent — no `signal`, no `lifecycle`, nothing (checked against the
+    // shipped types and the Phase 0 probe's dump of the real Context keys).
+    // So the plugin owns the controller instead. Without it, a hot reload
+    // mid-turn leaves fetches running against a torn-down generation until
+    // their own timeouts expire, which is the cancel-on-dispose case v1's
+    // audit already covered once.
+    const life = new AbortController()
+    off.push(() => life.abort())
+
     const [panel, setPanel] = ctx.storage.memory<Panel>("panel", {
       initial: { text: "inference · —" },
     })
@@ -362,7 +374,15 @@ export default Plugin.define({
 
     let lastKey = ""
 
+    // Monotonic guard against out-of-order renders. `report` awaits an engine
+    // fetch, so two turns completing close together race: whichever adapter
+    // answers last calls `show` last, which is not necessarily the later turn.
+    // The panel would then describe a turn that is not the one on screen --
+    // the same class of mistake as a session total read as per-turn.
+    let reportSeq = 0
+
     async function report(sessionID: string): Promise<void> {
+      const seq = ++reportSeq
       // `message.list()` is a union of message kinds and its tail after a turn
       // is an "idle" marker, not the reply — measured, see audit P1. Scan
       // backwards for the assistant message.
@@ -389,7 +409,10 @@ export default Plugin.define({
       }
 
       const turn = turns.get(info.id)
-      const http: HttpOptions = {}
+      // One signal for every fetch this turn. Each request still gets its own
+      // timeout inside `http.ts`; this composes on top so teardown cancels
+      // them all at once rather than leaving them to run the clock out.
+      const http: HttpOptions = { signal: life.signal }
 
       let line: string | null = null
       try {
@@ -442,6 +465,13 @@ export default Plugin.define({
 
       turns.delete(info.id)
       dbg(`turns: size ${turns.size} after completing ${info.id}`)
+      // History is written unconditionally above -- every completed turn is a
+      // real record. Only the panel is last-writer-wins, and only the latest
+      // turn may claim it.
+      if (seq !== reportSeq) {
+        dbg(`report ${seq} superseded by ${reportSeq}, not rendering`)
+        return
+      }
       show(line)
     }
 
