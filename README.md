@@ -154,8 +154,8 @@ plugin.
 - ✅ Provided by the engine
 - 🟡 Provided by OpenCode's universal layer, labelled `(host)` on the panel
 
-  Opencode's telemetry spans queue, network and event delivery as well as
-  prefill, so it is not the same measurement an engine reports,
+  OpenCode's telemetry spans queue, network and event delivery as well as
+  prefill, so it is not the same measurement an engine reports.
 - ❌ Not available
 
 ### Validated
@@ -384,15 +384,24 @@ Same shape for any OpenAI-compatible server:
 
 ## Important Notes
 
-### Decode rate, not whole-turn rate
+### tok/s is generation speed; the total is what you waited
 
-OpenCode's own status line divides tokens by the whole turn; this
-divides by the streaming window. On a turn with a long wait before the
-first token those differ by ~10x — measured: 38.1 tok/s over a 0.97s
-decode window against 3.7 over the same turn's 10.03s. Both are
-correct; the TTFT beside the rate is what reconciles them. A rate that
-genuinely *is* whole-turn (no stream window available) is labelled
-`overall`.
+`tok/s` is tokens over the time spent streaming after the first token —
+raw generation speed. OpenCode's own status line divides tokens by the
+whole turn instead; on a turn with a long wait before the first token the
+two differ by ~10x (measured: 38.1 tok/s over a 0.97s decode window
+against 3.7 over the same turn's 10.03s). Both are correct; the TTFT
+beside the rate is what reconciles them. A turn that cannot be timed
+from its stream shows no rate rather than a whole-turn figure.
+
+A large prefill shows in TTFT, in the prefill rate where the engine
+reports one, and in the total — never in `tok/s`. The total runs from
+the request to the end of the turn, and names any retries OpenCode made:
+`60.00s (6 retries)`.
+
+A turn that calls tools is several requests, one per step. Its tokens,
+cost and cache reuse are summed over every step; its `tok/s` covers only
+the steps' own streaming, never the time spent running tools.
 
 ### Every figure is one turn, never a running total
 
@@ -402,14 +411,19 @@ counters, and `time.streamed` (which is stamped at the *end* of the
 stream, not the start, and is therefore not a TTFT). The per-turn
 figures here are differenced or measured accordingly.
 
-A counter difference is only one turn's when exactly one request reached
-the engine between the two readings. OpenCode's own background work (a new
-session's title, compaction), a turn you interrupted that kept generating,
-or another tab or client sharing the server all break that, and no engine
-here labels its counters by request or session to separate them again. So
-for the Prometheus engines, a turn that shared its window shows the
-universal line with `engine data skipped: overlapping requests` rather than
-figures that describe several requests at once.
+A counter difference is only one turn's when the requests that reached the
+engine between the two readings are this turn's own — one per step — and
+its token count equals OpenCode's for the turn. OpenCode's own background
+work (a new session's title, compaction), a turn you interrupted that kept
+generating, or another tab or client sharing the server all break that, and
+no engine here labels its counters by request or session to separate them
+again. So for the Prometheus engines, a turn that shared its window shows
+the universal line with `engine data skipped: overlapping requests` rather
+than figures that describe several requests at once.
+
+`mtplx`, `koboldcpp` and `mlxserve` report the engine's latest request, so
+on a turn that calls tools their engine line describes the last step; the
+universal figures and the history row cover the whole turn.
 
 ### Absent is not zero
 
