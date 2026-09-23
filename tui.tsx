@@ -454,6 +454,27 @@ export default Plugin.define({
       }
       if (!info) return
 
+      // Diagnostics: the assistant messages that make up this turn. A turn
+      // that calls tools is several messages, one per step, and `info` above is
+      // only the LAST -- measured: the sidebar showed `41 tok  8.08s` for a
+      // tool-using turn OpenCode timed at 1m 31s. Logged only, to size the fix.
+      {
+        const steps: string[] = []
+        let first: number | undefined
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]
+          if (!m) continue
+          if (m.type === "user") break
+          if (m.type !== "assistant") continue
+          const tok = (m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)
+          steps.unshift(`${tok}${m.finish ? `/${m.finish}` : ""}`)
+          first = m.time?.created ?? first
+        }
+        const last = info.time?.completed
+        const span = first !== undefined && last !== undefined ? ` span ${((last - first) / 1000).toFixed(2)}s` : ""
+        dbg(`turn: ${steps.length} assistant message(s) [${steps.join(", ")}]${span}`)
+      }
+
       const provider = info.model?.providerID ?? ""
       const model = info.model?.id ?? ""
       const key = `${provider}/${model}`
