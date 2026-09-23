@@ -261,6 +261,17 @@ export default Plugin.define({
       // fallback below, so adapters stay leaves.
       const hostTtft = turnRate(0, info, turn).ttft
 
+      // Diagnostics for the non-Prometheus adapters: does the figure an
+      // adapter is about to render describe this turn? Their engines count
+      // tokens for whatever they report (the latest request, or a window), so
+      // a count that differs from OpenCode's own for the turn means it is
+      // another request's, or several. Logged only; nothing acts on it yet
+      // (v2 audit, "Open — non-Prometheus adapters").
+      const hostTokens = (info.tokens?.output ?? 0) + (info.tokens?.reasoning ?? 0)
+      const match = (engineTok: number | null | undefined, extra = ""): void => {
+        dbg(`${provider} match: engine ${engineTok ?? "?"} tok vs host ${hostTokens} tok${extra}`)
+      }
+
       /** Shared by every Prometheus engine; they differ only by spec and URL. */
       const prom = async (
         id: string,
@@ -301,6 +312,7 @@ export default Plugin.define({
       switch (provider) {
         case "mtplx": {
           const latest = await fetchMtplxLatest(cfg.mtplxUrl, http)
+          if (latest) match(latest.completion_tokens)
           return latest ? formatMtplxLine(latest, model) : null
         }
 
@@ -311,6 +323,7 @@ export default Plugin.define({
           setBase((d) => {
             d.omlx = now
           })
+          if (prev) match(now.completion - prev.completion, `; requests ${now.requests - prev.requests}`)
           return formatOmlxLine(now, prev, hostTtft)
         }
 
@@ -332,6 +345,7 @@ export default Plugin.define({
             return null
           }
           const t = diffLlamaCppCounters(prev, now)
+          if (t) match(t.completionTokens)
           return t ? formatLlamaCppLine(t, label, model, hostTtft) : null
         }
 
@@ -347,6 +361,7 @@ export default Plugin.define({
             return null
           }
           const t = diffSplashSamples(prev, now)
+          if (t) match(t.completionTokens, `; requests ${t.requests}`)
           return t ? formatSplashLine(t, model, hostTtft) : null
         }
 
@@ -359,6 +374,7 @@ export default Plugin.define({
             d.koboldGens[cfg.koboldBase] = perf.total_gens
           })
           const t = koboldTurn(perf, prev)
+          if (t) match(t.completionTokens, `; generations ${t.generationsInWindow ?? "?"}`)
           return t ? formatKoboldLine(t, model, hostTtft) : null
         }
 
@@ -373,6 +389,7 @@ export default Plugin.define({
           if (!recs) return null
           const t = mlxServeTurn(recs, base.mlxServeId[cfg.mlxServeBase])
           if (!t) return null // nothing newer than what was already reported
+          match(t.completionTokens, `; request ${t.requestId}`)
           setBase((d) => {
             d.mlxServeId[cfg.mlxServeBase] = t.requestId
           })
