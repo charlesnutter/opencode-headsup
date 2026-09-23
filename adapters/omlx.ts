@@ -114,7 +114,7 @@ export function formatOmlxLine(
   now: OmlxSample,
   prev: OmlxSample | undefined,
   hostTtft?: number,
-  host: { decodeTokS?: number; total?: number; retries?: number } = {}
+  host: { decodeTokS?: number; total?: number; retries?: number; includesSubagents?: boolean } = {}
 ): string {
   const header = `oMLX  ${short(now.model ?? "")}`
   // Host-derived, and labelled as such. No derived figure on this line takes
@@ -163,7 +163,7 @@ export function formatOmlxLine(
       host.total !== undefined ? `  ${nn(host.total, 2)}s` : ""
     }${
       (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }`,
+    }${host.includesSubagents ? " incl. sub-agents" : ""}`,
   ].join("\n")
 }
 

@@ -289,4 +289,11 @@ test("Splash: a verified multi-step turn needs no 'requests this turn' note", ()
   assert.ok(formatSplashLine(t, "m").includes("2 requests this turn"))
 })
 
+test("Splash: figures that include a same-engine sub-agent say so", () => {
+  const [b, a] = pair("splash")
+  const t = { ...diffSplashSamples(b, a), requests: 2 }
+  const out = formatSplashLine(t, "m", 0.4, { total: 9.0, steps: 2, includesSubagents: true })
+  assert.ok(out.includes("200 tok  9.00s incl. sub-agents"), out)
+})
+
 console.log(`\n${passed} passed`)

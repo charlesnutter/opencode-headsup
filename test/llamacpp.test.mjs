@@ -169,4 +169,10 @@ test("the total is OpenCode's -- what you waited -- with retries named", () => {
   assert.ok(out.includes("32 tok  7.00s (1 retry)"), out)
 })
 
+test("figures that include a same-engine sub-agent say so", () => {
+  const t = diffLlamaCppCounters(before, after)
+  const out = formatLlamaCppLine(t, "llama.cpp", "m", 0.3, { total: 7.0, includesSubagents: true })
+  assert.ok(out.includes("32 tok  7.00s incl. sub-agents"), out)
+})
+
 console.log(`\n${passed} passed`)

@@ -75,7 +75,7 @@ export interface TurnRecord {
    * their summed tokens and cost, and the span they ran (they can run in
    * parallel, so not a sum). Rates are never combined across them.
    */
-  subagents?: { count: number; tokens: number; spanS: number; cost?: number }
+  subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
   engine?: {
     prefillTokS?: number
     /** Tokens committed per verify pass (MTPLX's multi-token prediction). */

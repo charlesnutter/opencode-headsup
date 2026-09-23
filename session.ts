@@ -82,6 +82,8 @@ export function rollupSubagents(
   return {
     count: new Set(rows.map((t) => t.sessionID)).size,
     tokens: rows.reduce((n, t) => n + t.tokens, 0),
+    // Engine requests: one per step. A row from before steps existed is one.
+    steps: rows.reduce((n, t) => n + (t.steps ?? 1), 0),
     spanS: (end - start) / 1000,
     cost: sawCost ? cost : undefined,
   }

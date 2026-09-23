@@ -202,7 +202,7 @@ export function formatSplashLine(
   t: SplashTurn,
   model: string,
   hostTtft?: number,
-  host: { total?: number; retries?: number; steps?: number } = {}
+  host: { total?: number; retries?: number; steps?: number; includesSubagents?: boolean } = {}
 ): string {
   // Host-derived, and labelled as such. No derived figure on this line takes
   // its numerator from one source and its denominator from the other -- ttft
@@ -215,7 +215,7 @@ export function formatSplashLine(
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.prefillS + t.decodeS, 2)}s${
       (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }`,
+    }${host.includesSubagents ? " incl. sub-agents" : ""}`,
     `${ni(prompt)} prompt${t.cachedTokens > 0 ? `, ${ni(t.cachedTokens)} cached` : ""}`,
     t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",
     // Only when a turn spanned several requests (tool round trips), so the

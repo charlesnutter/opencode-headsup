@@ -309,6 +309,12 @@ export function formatPromLine(
     /** Assistant messages in the turn; a tool-using turn is one per step. */
     steps?: number
     retries?: number
+    /**
+     * The window also holds sub-agents' requests on this same engine; `tokens`
+     * and `steps` already include theirs. The counters can't separate them,
+     * so the engine's figures cover both, and the tokens line says so.
+     */
+    includesSubagents?: boolean
   }
 ): string | null {
   // One TTFT per step: a tool-using turn makes one request per step, so its
@@ -339,7 +345,7 @@ export function formatPromLine(
     single && diff.prefillTokS !== undefined ? `prefill ${ni(diff.prefillTokS)} tok/s` : "",
     `${ni(diff.completionTokens)} tok  (${ni(diff.promptTokens)} prompt${
       diff.cachedTokens > 0 ? `, ${ni(diff.cachedTokens)} cached` : ""
-    })${total !== undefined ? `  ${nn(total, 2)}s${retries}` : ""}`,
+    })${fallback.includesSubagents ? " incl. sub-agents" : ""}${total !== undefined ? `  ${nn(total, 2)}s${retries}` : ""}`,
   ]
     .filter(Boolean)
     .join("\n")

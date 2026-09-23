@@ -129,7 +129,7 @@ export function formatLlamaCppLine(
   label: string,
   model: string,
   hostTtft?: number,
-  host: { total?: number; retries?: number } = {}
+  host: { total?: number; retries?: number; includesSubagents?: boolean } = {}
 ): string {
   // Host-derived, and labelled as such. No derived figure on this line takes
   // its numerator from one source and its denominator from the other -- ttft
@@ -141,7 +141,7 @@ export function formatLlamaCppLine(
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
     `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.decodeS + t.prefillS, 2)}s${
       (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }`,
+    }${host.includesSubagents ? " incl. sub-agents" : ""}`,
   ]
     .filter(Boolean)
     .join("\n")

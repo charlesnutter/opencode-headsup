@@ -16,6 +16,12 @@
   finishing. Rates are never combined across them. The Session section
   totals them in a `sub-agents` row, and its time split gives the real time
   sub-agents were running its own share instead of folding it into `other`.
+- On `vllm`, `sglang`, `vllmmlx`, `aphrodite`, `lmdeploy`, `llamacpp`,
+  `llamafile`, `splash` and `omlx`, a turn whose sub-agent used the same
+  engine is no longer declined: the engine's window is expected to hold the
+  turn's requests and tokens plus the sub-agents'. Those figures then cover
+  both, and the line says `incl. sub-agents`. Rate and TTFT stay the turn's
+  own. Built and tested against captures; not yet run live.
 - `sessionBackground` option: the theme's offset shade behind the Session
   section.
 

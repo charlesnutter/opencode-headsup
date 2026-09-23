@@ -289,7 +289,13 @@ export default Plugin.define({
         engine?: TurnRecord["engine"]
       },
       /** The turn's assistant messages, one per step, oldest first. */
-      steps: readonly SessionMessageAssistant[]
+      steps: readonly SessionMessageAssistant[],
+      /**
+       * Sub-agents that ran on this same engine during the turn. A
+       * counter-difference engine's window holds their requests too, so its
+       * check expects the turn's tokens and steps plus theirs.
+       */
+      sameEngine?: TurnRecord["subagents"]
     ): Promise<string | null> {
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
@@ -338,11 +344,14 @@ export default Plugin.define({
         // Tier 1 supplies the fallback rate and total wherever the engine has
         // no single-request figure of its own. Passed in rather than imported
         // by the adapter, so adapters stay leaves.
+        // The fallback rate is this turn's own generation: OpenCode's count
+        // over its streaming, never the window's, which can include sub-agents.
         const line = formatPromLine(diff, label, model, {
-          ...turnRate(diff.completionTokens, info, turn),
-          tokens: hostTok,
-          steps: turn?.steps,
+          ...turnRate(hostTok, info, turn),
+          tokens: windowTokens,
+          steps: windowSteps,
           retries: turn?.retries,
+          includesSubagents,
         })
         if (line === null) tier2.sharedWindow = true
         else if ((turn?.steps ?? 1) === 1 && diff.prefillTokS !== undefined) tier2.engine = { prefillTokS: diff.prefillTokS }
@@ -359,6 +368,11 @@ export default Plugin.define({
         return (await Promise.all(reads)) as Array<T | null>
       }
       const hostFigures = { total: turnRate(0, info, turn).total, retries: turn?.retries }
+      // What a counter-difference window should hold: this turn's tokens and
+      // steps, plus any sub-agents' on this same engine.
+      const windowTokens = hostTokens + (sameEngine?.tokens ?? 0)
+      const windowSteps = steps.length + (sameEngine?.steps ?? 0)
+      const includesSubagents = sameEngine !== undefined
 
       switch (provider) {
         case "mtplx": {
@@ -403,7 +417,7 @@ export default Plugin.define({
             // A window that isn't this turn's -- a spare request, or tokens
             // that don't match -- is declined. The no-baseline render below
             // is labelled as the server's averages and needs no check.
-            if (now.requests > prev.requests && !omlxIsThisTurn(prev, now, { tokens: hostTokens, steps: steps.length })) {
+            if (now.requests > prev.requests && !omlxIsThisTurn(prev, now, { tokens: windowTokens, steps: windowSteps })) {
               tier2.sharedWindow = true
               return null
             }
@@ -411,6 +425,7 @@ export default Plugin.define({
           return formatOmlxLine(now, prev, hostTtft, {
             ...hostFigures,
             decodeTokS: turnRate(hostTokens, info, turn).decodeTokS,
+            includesSubagents,
           })
         }
 
@@ -434,12 +449,12 @@ export default Plugin.define({
           const t = diffLlamaCppCounters(prev, now)
           if (!t) return null
           match(t.completionTokens, `; steps ${steps.length}`)
-          if (!llamaCppIsThisTurn(t, hostTokens)) {
+          if (!llamaCppIsThisTurn(t, windowTokens)) {
             tier2.sharedWindow = true
             return null
           }
           tier2.engine = { prefillTokS: t.prefillTokS }
-          return formatLlamaCppLine(t, label, model, hostTtft, hostFigures)
+          return formatLlamaCppLine(t, label, model, hostTtft, { ...hostFigures, includesSubagents })
         }
 
         case "splash": {
@@ -456,12 +471,12 @@ export default Plugin.define({
           const t = diffSplashSamples(prev, now)
           if (!t) return null
           match(t.completionTokens, `; requests ${t.requests}, steps ${steps.length}`)
-          if (!splashIsThisTurn(t, { tokens: hostTokens, steps: steps.length })) {
+          if (!splashIsThisTurn(t, { tokens: windowTokens, steps: windowSteps })) {
             tier2.sharedWindow = true
             return null
           }
           tier2.engine = { prefillTokS: t.prefillTokS, draftAccept: t.draftAcceptRate }
-          return formatSplashLine(t, model, hostTtft, { ...hostFigures, steps: steps.length })
+          return formatSplashLine(t, model, hostTtft, { ...hostFigures, steps: windowSteps, includesSubagents })
         }
 
         case "koboldcpp":
@@ -627,13 +642,43 @@ export default Plugin.define({
       // them all at once rather than leaving them to run the clock out.
       const http: HttpOptions = { signal: life.signal }
 
+      // Sub-agents that ran during this turn, each in its own child session
+      // whose turns are recorded under that session (measured: the child's
+      // row existed, and the child had finished, 11s before the parent's turn
+      // ended). Their tokens, time and cost are summed onto one line; rates
+      // are never combined, since a sub-agent can run on another model.
+      let subagents: TurnRecord["subagents"]
+      let sameEngine: TurnRecord["subagents"]
+      try {
+        const descendants = ctx.data.session.family(sessionID).filter((id) => {
+          let p = ctx.data.session.get(id)?.parentID
+          for (let hops = 0; p && hops < 16; hops++) {
+            if (p === sessionID) return true
+            p = ctx.data.session.get(p)?.parentID
+          }
+          return false
+        })
+        const until = Date.now()
+        subagents = rollupSubagents(history.turns, descendants, info.time.created, until)
+        // The ones on this same engine: counter-difference engines see their
+        // requests in this turn's window, so the check expects them too.
+        sameEngine = rollupSubagents(
+          history.turns.filter((t) => t.provider === provider),
+          descendants,
+          info.time.created,
+          until
+        )
+      } catch (e: unknown) {
+        dbg(`sub-agent lookup threw: ${String(e)}`)
+      }
+
       const tier2: { pendingBaseline: boolean; sharedWindow: boolean; engine?: TurnRecord["engine"] } = {
         pendingBaseline: false,
         sharedWindow: false,
       }
       let line: string | null = null
       try {
-        line = await enrich(provider, model, info, turn, http, tier2, steps)
+        line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -662,25 +707,6 @@ export default Plugin.define({
         else if (tier2.sharedWindow) line += "\nengine data skipped: overlapping requests"
       }
 
-      // Sub-agents that ran during this turn, each in its own child session
-      // whose turns are recorded under that session (measured: the child's
-      // row existed, and the child had finished, 11s before the parent's turn
-      // ended). Their tokens, time and cost are summed onto one line; rates
-      // are never combined, since a sub-agent can run on another model.
-      let subagents: TurnRecord["subagents"]
-      try {
-        const descendants = ctx.data.session.family(sessionID).filter((id) => {
-          let p = ctx.data.session.get(id)?.parentID
-          for (let hops = 0; p && hops < 16; hops++) {
-            if (p === sessionID) return true
-            p = ctx.data.session.get(p)?.parentID
-          }
-          return false
-        })
-        subagents = rollupSubagents(history.turns, descendants, info.time.created, Date.now())
-      } catch (e: unknown) {
-        dbg(`sub-agent lookup threw: ${String(e)}`)
-      }
       if (subagents) line += `\n${formatSubagentLine(subagents)}`
 
       // Keep the turn for the drill-down. Every figure below is OpenCode's own,

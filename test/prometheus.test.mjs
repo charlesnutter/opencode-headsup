@@ -538,6 +538,24 @@ test("Prometheus: renders from a real live vLLM capture", () => {
   assert.ok(!out.includes("?"), out)
 })
 
+// A sub-agent on the same engine adds its requests and tokens to the turn's
+// window. The window is accepted when it holds the turn's steps plus the
+// sub-agents', and the tokens equal both; its engine figures then cover both,
+// and the tokens line says so.
+test("Prometheus: a window with a same-engine sub-agent is accepted and labelled", () => {
+  const diff = { completionTokens: 1424, promptTokens: 30000, cachedTokens: 0, ttftExact: false,
+    requests: { ttft: 7, duration: 7 } }
+  const out = formatPromLine(diff, "vllm-mlx", "m",
+    { decodeTokS: 30, ttft: 1.2, total: 207.4, tokens: 1424, steps: 7, includesSubagents: true })
+  assert.ok(out !== null, "5 parent steps + 2 sub-agent steps, 1233 + 191 tokens")
+  assert.ok(out.includes("1424 tok  (30000 prompt) incl. sub-agents"), out)
+})
+
+test("Prometheus: without the flag, the same line carries no such label", () => {
+  const diff = { completionTokens: 50, promptTokens: 33, cachedTokens: 0, ttftExact: true, requests: { ttft: 1, duration: 1 } }
+  assert.ok(!formatPromLine(diff, "vLLM", "m", { tokens: 50 }).includes("sub-agents"))
+})
+
 console.log(`\n${passed} passed`)
 if (process.exitCode) {
   console.error("some tests failed")

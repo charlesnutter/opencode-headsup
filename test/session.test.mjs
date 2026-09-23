@@ -222,4 +222,11 @@ test("the time row names sub-agents only when some ran", () => {
   assert.equal(without.time, "20% gen · 10% wait · 70% other")
 })
 
+test("the roll-up carries its sub-agents' steps -- one engine request each", () => {
+  const r = rollupSubagents([child({ steps: 2 }), child({ sessionID: "ses_b", steps: 3 })], ["ses_child", "ses_b"], 0, 40_000)
+  assert.equal(r.steps, 5)
+  // A row recorded before steps existed counts as one request.
+  assert.equal(rollupSubagents([child({ steps: undefined })], ["ses_child"], 0, 40_000).steps, 1)
+})
+
 console.log(`\n${passed} passed`)

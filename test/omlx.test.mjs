@@ -177,4 +177,9 @@ test("a multi-step turn uses OpenCode's generation rate, not the server's all-ti
   assert.ok(out.includes("12.00s"), out)
 })
 
+test("figures that include a same-engine sub-agent say so", () => {
+  const out = formatOmlxLine(afterTwo, afterOne, 0.5, { decodeTokS: 42.5, total: 12.0, includesSubagents: true })
+  assert.ok(out.includes("12.00s incl. sub-agents"), out)
+})
+
 console.log(`\n${passed} passed`)
