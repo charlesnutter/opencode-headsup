@@ -169,12 +169,20 @@ export interface PromDiff {
   /** Mean TTFT over the requests in this window; exact when `ttftExact`. */
   ttft?: number
   /**
-   * True when exactly one request landed in the window, which makes `ttft`
-   * and `durationS` that request's own values rather than an average over
-   * several. OpenCode issues one request per turn, so this is the norm.
+   * True when exactly one TTFT was recorded in the window, making `ttft` that
+   * request's own. Necessary but not sufficient for the window to be this
+   * turn's: a non-streamed request records no TTFT at all (measured on
+   * vllm-mlx), so `formatPromLine` also checks the token count.
    */
   ttftExact: boolean
+  /**
+   * Request duration, only when exactly one was recorded. A mean over several
+   * is not a duration: measured on vllm-mlx, every OpenCode turn is joined by
+   * a ~0s rejected title request, and the mean halved the turn's real time.
+   */
   durationS?: number
+  /** How many TTFT and duration records the window holds, for diagnostics. */
+  requests: { ttft: number; duration: number }
   /**
    * Decode rate measured by the engine itself: tokens over (duration - TTFT),
    * i.e. excluding prefill. Only when the engine publishes both histograms
@@ -201,7 +209,7 @@ export function diffPromSamples(prev: PromSample, now: PromSample): PromDiff | n
   const dTtftCount = now.ttftCount - prev.ttftCount
   const ttft = dTtftCount > 0 ? (now.ttftSum - prev.ttftSum) / dTtftCount : undefined
   const dDurCount = now.durationCount - prev.durationCount
-  const durationS = dDurCount > 0 ? (now.durationSum - prev.durationSum) / dDurCount : undefined
+  const durationS = dDurCount === 1 ? now.durationSum - prev.durationSum : undefined
 
   // Exactly one request in the window makes these figures this turn's own.
   const exact = dTtftCount === 1
@@ -256,6 +264,7 @@ export function diffPromSamples(prev: PromSample, now: PromSample): PromDiff | n
     ttft,
     ttftExact: exact,
     durationS,
+    requests: { ttft: dTtftCount, duration: dDurCount },
     decodeTokS,
     prefillTokS,
   }
@@ -272,21 +281,30 @@ export function diffPromSamples(prev: PromSample, now: PromSample): PromDiff | n
  * `fallback` supplies OpenCode's own turn timing for engines that publish no
  * duration histogram (vLLM, Aphrodite). Where the engine does publish one,
  * its measured decode rate wins, because it excludes prefill and ours cannot.
- * Returns null unless exactly one request landed in the window
- * (`ttftExact`). Otherwise every figure here is a sum or mean over requests
- * this turn cannot be separated from — no engine labels a series by request
- * or session — and the caller falls back to the universal line. Measured: a
- * 46-token answer sharing a window with an interrupted runaway turn rendered
- * `116135.1 tok/s` over `8594 tok`. Labelling only the ttft `(avg)`, as this
- * once did, left every other figure passing as the turn's own.
+ * Returns null unless the window is this turn's alone: exactly one TTFT, and
+ * an engine token count equal to OpenCode's own for the turn (`fallback.tokens`,
+ * which comes from the same usage block the engine counts; they matched
+ * exactly on every clean window measured). Otherwise every figure here is a
+ * sum or mean over requests this turn cannot be separated from — no engine
+ * labels a series by request or session — and the caller falls back to the
+ * universal line. Measured: a 46-token answer sharing a window with an
+ * interrupted runaway turn rendered `116135.1 tok/s` over `8594 tok`; a
+ * non-streamed request (no TTFT) slipped past the TTFT check alone. A request
+ * that generated nothing, such as a rejected title request, cannot disturb the
+ * token count and does not decline the line.
+ *
+ * A `fallback.tokens` of 0 or absent means OpenCode has no count for the turn,
+ * and the token check is skipped rather than failing every turn.
  */
 export function formatPromLine(
   diff: PromDiff,
   label: string,
   model: string,
-  fallback: { decodeTokS?: number; total?: number; rateWindow?: "decode" | "whole" }
+  fallback: { decodeTokS?: number; total?: number; rateWindow?: "decode" | "whole"; tokens?: number }
 ): string | null {
   if (!diff.ttftExact) return null
+  const host = fallback.tokens
+  if (host !== undefined && host > 0 && host !== diff.completionTokens) return null
   const decodeTokS = diff.decodeTokS ?? fallback.decodeTokS
   // The engine's own figure is a decode phase and needs no qualifier — the
   // ttft beside it explains the rest of the turn. A whole-turn FALLBACK is

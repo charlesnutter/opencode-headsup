@@ -339,6 +339,86 @@ test("Prometheus: the measured 8594-vs-46 window is declined, not rendered", () 
   assert.equal(out, null, `must not render window-wide figures as this turn's:\n${out}`)
 })
 
+// Two live measurements on vllm-mlx (Qwen3.5-9B, 2026-09-22) shape the rule
+// below. First: a non-streamed request records a duration and tokens but no
+// TTFT, so the TTFT count alone saw one request where there were two. Second:
+// every OpenCode turn is followed by a title request that vllm-mlx's serialized
+// engine rejects ("route is busy") -- a ~0s duration, no TTFT, no tokens. So
+// neither count identifies the turn on its own. What does is the token count:
+// OpenCode reports this turn's own, from the same usage block the engine
+// counts, and they matched exactly on every clean window measured.
+
+test("Prometheus: a non-streamed request is caught by the token count", () => {
+  // Measured: one TTFT, two durations, 77 engine tokens for a ~35-token turn.
+  // The sidebar rendered `77 tok` with no notice.
+  const before = parsePromSample(fixture("vllm-mlx-idle.prom"), VLLM_MLX_SPEC)
+  const now = {
+    ...before,
+    generation: before.generation + 77,
+    prompt: before.prompt + 8235,
+    ttftCount: before.ttftCount + 1,
+    ttftSum: before.ttftSum + 5.03,
+    durationCount: before.durationCount + 2,
+    durationSum: before.durationSum + 4.36,
+  }
+  const diff = diffPromSamples(before, now)
+  const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 6.2, total: 5.7, rateWindow: "decode", tokens: 35 })
+  assert.equal(out, null, `another request's tokens are in this window:\n${out}`)
+})
+
+test("Prometheus: a rejected title request leaves the turn's engine figures intact", () => {
+  // Measured: engine 45 tok vs host 45 tok, one TTFT, two durations -- the
+  // second a ~0s rejection. Tokens and prompt are this turn's and should show.
+  const before = parsePromSample(fixture("vllm-mlx-idle.prom"), VLLM_MLX_SPEC)
+  const now = {
+    ...before,
+    generation: before.generation + 45,
+    prompt: before.prompt + 8200,
+    ttftCount: before.ttftCount + 1,
+    ttftSum: before.ttftSum + 5.15,
+    durationCount: before.durationCount + 2,
+    durationSum: before.durationSum + 5.86 + 0.0,
+  }
+  const diff = diffPromSamples(before, now)
+  const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 61.9, total: 5.86, rateWindow: "decode", tokens: 45 })
+  assert.ok(out !== null, "a matching token count keeps the engine line")
+  assert.ok(out.includes("45 tok"), out)
+  assert.ok(out.includes("8200 prompt"), out)
+})
+
+test("Prometheus: a duration averaged over two requests is never shown as the turn's", () => {
+  // The same window: the engine's mean duration is (5.86 + 0) / 2 = 2.93s,
+  // and duration-minus-TTFT is negative. Neither is this turn's. Measured
+  // earlier the same way: sidebar `0.32s` against OpenCode's own `649ms`.
+  const before = parsePromSample(fixture("vllm-mlx-idle.prom"), VLLM_MLX_SPEC)
+  const now = {
+    ...before,
+    generation: before.generation + 45,
+    ttftCount: before.ttftCount + 1,
+    ttftSum: before.ttftSum + 5.15,
+    durationCount: before.durationCount + 2,
+    durationSum: before.durationSum + 5.86,
+  }
+  const diff = diffPromSamples(before, now)
+  assert.equal(diff.durationS, undefined, "a mean over several requests is not a duration")
+  assert.equal(diff.decodeTokS, undefined)
+  const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 61.9, total: 5.86, rateWindow: "decode", tokens: 45 })
+  assert.ok(out.includes("5.86s"), `OpenCode's own total, not the mean:\n${out}`)
+  assert.ok(!out.includes("2.93s"), out)
+})
+
+test("Prometheus: a token mismatch alone declines, even with one of each record", () => {
+  const diff = { completionTokens: 90, promptTokens: 33, cachedTokens: 0, ttft: 0.2, ttftExact: true, durationS: 2.0 }
+  assert.equal(formatPromLine(diff, "vllm-mlx", "m", { tokens: 48 }), null)
+})
+
+test("Prometheus: with no host count to compare, the token check does not apply", () => {
+  // 0 means OpenCode has no count for the turn, not that nothing was generated.
+  const diff = { completionTokens: 50, promptTokens: 33, cachedTokens: 0, ttftExact: true }
+  assert.ok(formatPromLine(diff, "vLLM", "m", { tokens: 0 }) !== null)
+  assert.ok(formatPromLine(diff, "vLLM", "m", NO_FALLBACK) !== null)
+})
+
 test("Prometheus: a window where no request started is declined too", () => {
   // Tokens arrived but no first token did: the tail of a request that began
   // in an earlier window, e.g. a turn interrupted and still generating.

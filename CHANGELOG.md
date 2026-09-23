@@ -6,6 +6,12 @@
   second tab. Measured: a 46-token answer showed `116135.1 tok/s` over
   `8594 tok`. Such a turn now shows the universal line with
   `engine data skipped: overlapping requests`.
+- On engines that publish a request-duration histogram (`sglang`,
+  `vllmmlx`, `lmdeploy`), the turn's total and engine-derived decode rate
+  were averaged with any other request in the window. On vllm-mlx every
+  OpenCode turn is joined by a rejected ~0s title request, which halved the
+  total (`0.32s` against OpenCode's own `649ms`). The engine's duration is
+  now used only when exactly one was recorded; otherwise OpenCode's timing.
 - The history panel's legend said `*` rows were "engine-measured". Every row
   holds OpenCode's own figures; `*` only means the sidebar line for that turn
   came from the engine. The legend now says so.

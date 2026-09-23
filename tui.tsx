@@ -288,18 +288,20 @@ export default Plugin.define({
         }
         const diff = diffPromSamples(prev, now)
         if (!diff) return null
-        // Measures how often a window holds more than one request (audit §4
-        // correction). The engine's token delta exceeding the host's own
-        // count for this turn is the direct sign another request landed.
+        // OpenCode's own count for this turn; the adapter declines the engine
+        // line when the window's count differs (another request's tokens).
         const hostTok = (info.tokens?.output ?? 0) + (info.tokens?.reasoning ?? 0)
         dbg(
-          `${id} window: ${diff.ttftExact ? "1 request" : "requests≠1"}; ` +
+          `${id} window: ttft ${diff.requests.ttft}, duration ${diff.requests.duration}; ` +
             `engine ${diff.completionTokens} tok vs host ${hostTok} tok`
         )
-        // Tier 1 supplies the fallback rate for engines with no duration
-        // histogram. Passed in rather than imported by the adapter, so
-        // adapters stay leaves.
-        const line = formatPromLine(diff, label, model, turnRate(diff.completionTokens, info, turn))
+        // Tier 1 supplies the fallback rate and total wherever the engine has
+        // no single-request figure of its own. Passed in rather than imported
+        // by the adapter, so adapters stay leaves.
+        const line = formatPromLine(diff, label, model, {
+          ...turnRate(diff.completionTokens, info, turn),
+          tokens: hostTok,
+        })
         if (line === null) tier2.sharedWindow = true
         return line
       }
