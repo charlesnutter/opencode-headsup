@@ -70,7 +70,7 @@ Collapsed, the line keeps one figure rather than becoming a bare label:
 
 ## Configuration
 
-One key, because one figure is genuinely a preference. Everything else
+Two keys, because two things are genuinely preferences. Everything else
 appears exactly when its underlying data exists and stays silent when it
 does not — there is nothing to choose.
 
@@ -79,7 +79,7 @@ does not — there is nothing to choose.
   "plugins": [
     {
       "package": "@banburist/opencode-headsup",
-      "options": { "showContext": false }
+      "options": { "showContext": false, "sessionBackground": false }
     }
   ]
 }
@@ -91,6 +91,12 @@ Adds a `13% prompt/limit` line, computed as
 `tokens.input / ModelInfo.limit.context` based on the model's
 config in `opencode.json`. Labeled as `prompt/limit` rather than
 `context used`.
+
+**sessionBackground** (default `false`)
+
+Puts your theme's offset panel shade behind the Session section. Off by
+default because some themes and terminals use a transparent background,
+where the shade can disappear.
 
 ### Endpoints
 

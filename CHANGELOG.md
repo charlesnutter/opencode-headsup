@@ -1,3 +1,22 @@
+## [Unreleased]
+### Added
+- A **Session** section below the per-turn figures, collapsed by default:
+  click its heading to open it. Collapsed, it still shows the session's
+  generation speed (`▸ Session · 14 turns · 48.2 tok/s avg`). Open, it
+  shows generation tok/s with a trend of recent turns, TTFT median and
+  worst, cache hit rate, how the time split between generating, waiting
+  for the first token and everything else, the engine's own averages
+  (MTP or draft acceptance, prefill rate) where the engine provides them,
+  and retries. Only the current model's turns count; the heading says so
+  when the model changed partway through. The session's tokens, context
+  and cost are left to OpenCode's own sidebar.
+- `sessionBackground` option: the theme's offset shade behind the Session
+  section.
+
+### Changed
+- The per-turn block's first line (engine and model) is bold, matching
+  OpenCode's own sidebar sections.
+
 ## [0.2.4] – 2026-09-23
 ### Changed
 - `mtplx` is read at the end of every step, not once per turn, so a turn

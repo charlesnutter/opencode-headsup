@@ -32,6 +32,7 @@ import type { HttpOptions } from "./http"
 import { universalLine, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
 import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
+import { summariseSession, sessionHeading, sessionRows } from "./session"
 
 import { fetchMtplxLatest, formatMtplxLine, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, formatOmlxLine, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -122,6 +123,7 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
     mlxServeKey: str(options["mlxServeApiKey"], "MLX_API_KEY", ""),
     display: {
       context: bool(options["showContext"], DEFAULT_DISPLAY.context),
+      sessionBackground: bool(options["sessionBackground"], DEFAULT_DISPLAY.sessionBackground),
     },
   }
 }
@@ -152,6 +154,8 @@ interface Baselines {
 /** Durable UI preference, independent of any one turn. */
 interface UiState {
   collapsed: boolean
+  /** The Session section is expanded. Collapsed by default. */
+  sessionOpen?: boolean
 }
 
 // ---- entry ------------------------------------------------------------------
@@ -200,6 +204,11 @@ export default Plugin.define({
     const toggleCollapsed = (): void => {
       setUi((d) => {
         d.collapsed = !d.collapsed
+      }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
+    }
+    const toggleSession = (): void => {
+      setUi((d) => {
+        d.sessionOpen = !d.sessionOpen
       }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
     }
 
@@ -912,12 +921,47 @@ export default Plugin.define({
             // highlight) instead of just toggling. This is a footer we
             // render, not a passage a user would want to copy, so turning
             // selection off is the right default rather than a workaround.
+            if (ui.collapsed) {
+              return (
+                <text selectable={false} onMouseDown={() => toggleCollapsed()}>
+                  {formatCollapsedLine(latestFor(history.turns, input.sessionID), input.sessionID)}
+                </text>
+              )
+            }
+            // The per-turn block keeps OpenCode's own sidebar style: its first
+            // line (engine and model) bold as a title, the figures below.
+            const [title, ...figures] = lineFor(panel, input.sessionID).split("\n")
+            // The Session section: below the per-turn block, collapsed by
+            // default, set apart by a blank line, a bold clickable heading
+            // and subdued label/value rows -- so the two never read as one
+            // list. Absent until the session has a recorded turn.
+            const summary = summariseSession(history.turns, input.sessionID)
+            const open = ui.sessionOpen === true
             return (
-              <text selectable={false} onMouseDown={() => toggleCollapsed()}>
-                {ui.collapsed
-                  ? formatCollapsedLine(latestFor(history.turns, input.sessionID), input.sessionID)
-                  : lineFor(panel, input.sessionID)}
-              </text>
+              <box flexDirection="column">
+                <text selectable={false} onMouseDown={() => toggleCollapsed()}>
+                  <b>{title}</b>
+                  {figures.length > 0 ? `\n${figures.join("\n")}` : ""}
+                </text>
+                {summary ? (
+                  <box
+                    flexDirection="column"
+                    marginTop={1}
+                    backgroundColor={cfg.display.sessionBackground ? ctx.theme.background.surface.offset : undefined}
+                  >
+                    <text selectable={false} onMouseDown={() => toggleSession()}>
+                      <b>{sessionHeading(summary, open)}</b>
+                    </text>
+                    {open ? (
+                      <text selectable={false} fg={ctx.theme.text.subdued}>
+                        {sessionRows(summary)
+                          .map(([label, value]) => `  ${label.padEnd(11)}${value}`)
+                          .join("\n")}
+                      </text>
+                    ) : null}
+                  </box>
+                ) : null}
+              </box>
             )
           },
         })

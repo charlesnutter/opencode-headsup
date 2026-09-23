@@ -242,9 +242,16 @@ export function aggregateTurn(
  */
 export interface Display {
   context: boolean
+  /**
+   * Put the theme's offset panel shade behind the Session section. Off by
+   * default: on themes and terminals with a transparent background the shade
+   * can vanish, and the section already reads as separate by its heading,
+   * spacing and subdued rows. Judged live, in the user's own theme.
+   */
+  sessionBackground: boolean
 }
 
-export const DEFAULT_DISPLAY: Display = { context: false }
+export const DEFAULT_DISPLAY: Display = { context: false, sessionBackground: false }
 
 export function universalLine(
   provider: string,
