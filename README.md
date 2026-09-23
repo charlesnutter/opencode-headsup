@@ -1,6 +1,6 @@
 <h1 align="center">
-  <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/headsup-wordmark-dark.svg"
-       alt="OpenCode Heads Up" width="420">
+  <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/headsup-wordmark-card.svg"
+       alt="OpenCode Heads Up" width="510">
 </h1>
 
 OpenCode Heads Up is a heads-up display (HUD) with per-turn telemetry
