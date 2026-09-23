@@ -273,7 +273,12 @@ export default Plugin.define({
        * other requests besides this turn: the engine figures were declined
        * as unattributable, and the line should say why they are missing.
        */
-      tier2: { pendingBaseline: boolean; sharedWindow: boolean },
+      tier2: {
+        pendingBaseline: boolean
+        sharedWindow: boolean
+        /** Engine-only figures of an accepted reading, for the history row. */
+        engine?: TurnRecord["engine"]
+      },
       /** The turn's assistant messages, one per step, oldest first. */
       steps: readonly SessionMessageAssistant[]
     ): Promise<string | null> {
@@ -331,6 +336,7 @@ export default Plugin.define({
           retries: turn?.retries,
         })
         if (line === null) tier2.sharedWindow = true
+        else if ((turn?.steps ?? 1) === 1 && diff.prefillTokS !== undefined) tier2.engine = { prefillTokS: diff.prefillTokS }
         return line
       }
 
@@ -367,6 +373,11 @@ export default Plugin.define({
             // Receipts that exist but are not the steps' own: say why.
             if (receipts.every((r) => r !== null)) tier2.sharedWindow = true
             return null
+          }
+          const verifies = combined.verify_calls ?? 0
+          tier2.engine = {
+            prefillTokS: combined.prefill_tok_s ?? undefined,
+            mtpX: verifies > 0 && combined.completion_tokens ? combined.completion_tokens / verifies : undefined,
           }
           return formatMtplxLine(combined, model, hostFigures)
         }
@@ -418,6 +429,7 @@ export default Plugin.define({
             tier2.sharedWindow = true
             return null
           }
+          tier2.engine = { prefillTokS: t.prefillTokS }
           return formatLlamaCppLine(t, label, model, hostTtft, hostFigures)
         }
 
@@ -439,6 +451,7 @@ export default Plugin.define({
             tier2.sharedWindow = true
             return null
           }
+          tier2.engine = { prefillTokS: t.prefillTokS, draftAccept: t.draftAcceptRate }
           return formatSplashLine(t, model, hostTtft, { ...hostFigures, steps: steps.length })
         }
 
@@ -461,6 +474,7 @@ export default Plugin.define({
               if (perfs.every((p) => p !== null)) tier2.sharedWindow = true
               return null
             }
+            tier2.engine = { prefillTokS: combined.prefillTokS, draftAccept: combined.draftAcceptRate }
             return formatKoboldLine(combined, model, hostTtft, hostFigures)
           }
           // No per-step reads: one read now, which can only describe the
@@ -589,7 +603,10 @@ export default Plugin.define({
       // them all at once rather than leaving them to run the clock out.
       const http: HttpOptions = { signal: life.signal }
 
-      const tier2 = { pendingBaseline: false, sharedWindow: false }
+      const tier2: { pendingBaseline: boolean; sharedWindow: boolean; engine?: TurnRecord["engine"] } = {
+        pendingBaseline: false,
+        sharedWindow: false,
+      }
       let line: string | null = null
       try {
         line = await enrich(provider, model, info, turn, http, tier2, steps)
@@ -643,6 +660,12 @@ export default Plugin.define({
         source: enriched ? "engine" : "host",
         // Host-derived like every figure in this row; see TurnRecord.ttftSource.
         ttftSource: "host",
+        promptTokens: turn?.promptTokens,
+        streamS: turn?.streamMs ? turn.streamMs / 1000 : undefined,
+        waitS: turn?.waitMs !== undefined ? turn.waitMs / 1000 : undefined,
+        retries: turn?.retries,
+        steps: turn?.steps,
+        engine: enriched ? tier2.engine : undefined,
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns

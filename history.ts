@@ -55,6 +55,28 @@ export interface TurnRecord {
   /** Prompt tokens served from cache rather than recomputed. */
   cached?: number
   source: Source
+  /** Prompt tokens NOT served from cache, summed over the turn's steps. */
+  promptTokens?: number
+  /** Time spent streaming after each step's first token, summed (seconds). */
+  streamS?: number
+  /** Time spent waiting for each step's first token, summed (seconds). */
+  waitS?: number
+  /** Retries OpenCode made across the turn. */
+  retries?: number
+  /** Model requests in the turn: one per step. */
+  steps?: number
+  /**
+   * Engine-only figures, recorded only when the engine's reading for this
+   * turn was accepted -- so a session average of them covers only such
+   * turns. Every other figure in the row is OpenCode's own.
+   */
+  engine?: {
+    prefillTokS?: number
+    /** Tokens committed per verify pass (MTPLX's multi-token prediction). */
+    mtpX?: number
+    /** Share of speculative draft tokens accepted (KoboldCpp, Splash). */
+    draftAccept?: number
+  }
 }
 
 export interface History {

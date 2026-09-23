@@ -343,4 +343,24 @@ test("a one-step turn aggregates to exactly that step", () => {
   assert.ok(Math.abs(turnRate(140, info, turn).decodeTokS - 140 / 3.13) < 0.01)
 })
 
+// ---- what the Session section adds up ----------------------------------------
+test("the turn records time spent waiting for each step's first token", () => {
+  // a1: created T0, first token T0+7.4s; a2: T0+14s -> T0+20s; a3: T0+26.93s -> T0+34s.
+  const { turn } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.equal(turn.waitMs, 7_400 + 6_000 + 7_070)
+})
+
+test("the turn records the prompt tokens of every step, not just the last", () => {
+  // The last step's input is the context the turn ended at (info.tokens.input);
+  // a cache hit rate needs every step's prompt, since each step read one.
+  const { turn } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.equal(turn.promptTokens, 7000 + 7200 + 7500)
+})
+
+test("a step with no first token contributes no waiting time and marks it incomplete", () => {
+  const partial = new Map([...marks].filter(([k]) => k !== "a2"))
+  const { turn } = aggregateTurn(turnSteps(toolTurn), partial)
+  assert.equal(turn.waitMs, undefined)
+})
+
 console.log(`\n${passed} passed`)

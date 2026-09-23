@@ -30,6 +30,14 @@ export interface Turn {
   retries?: number
   /** Assistant messages in the turn, when aggregated; one per step. */
   steps?: number
+  /**
+   * Time spent waiting for each step's first token, summed: request to
+   * first streamed delta, per step. Undefined when any step has no first
+   * token, so a partial sum is never passed off as the turn's.
+   */
+  waitMs?: number
+  /** Prompt tokens of every step, summed; each step read a prompt. */
+  promptTokens?: number
 }
 
 /**
@@ -150,6 +158,9 @@ export function aggregateTurn(
   let streamMs = 0
   let timed = true
   let retries = 0
+  let waitMs = 0
+  let waited = true
+  let promptTokens = 0
   for (const m of steps) {
     output += m.tokens?.output ?? 0
     reasoning += m.tokens?.reasoning ?? 0
@@ -161,6 +172,9 @@ export function aggregateTurn(
     }
     const t = marks.get(m.id)
     retries += Math.max(0, (t?.attempts ?? 1) - 1)
+    promptTokens += m.tokens?.input ?? 0
+    if (t?.firstAt !== undefined && t.firstAt > m.time.created) waitMs += t.firstAt - m.time.created
+    else waited = false
     if (t?.firstAt !== undefined && t.lastAt !== undefined && t.lastAt > t.firstAt) streamMs += t.lastAt - t.firstAt
     else timed = false
   }
@@ -191,6 +205,8 @@ export function aggregateTurn(
     streamMs: timed ? streamMs : 0,
     retries,
     steps: steps.length,
+    waitMs: waited ? waitMs : undefined,
+    promptTokens,
   }
   return { info, turn }
 }
