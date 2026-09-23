@@ -146,6 +146,19 @@ export function formatRow(t: TurnRecord, modelWidth = 18): string {
 }
 
 /**
+ * The newest recorded turn for one session. `turns` is newest first. With
+ * several tabs open, the newest turn overall is often another tab's, so the
+ * collapsed line must look up its own session's rather than take `turns[0]`.
+ */
+export function latestFor(
+  turns: readonly TurnRecord[],
+  sessionID: string | undefined
+): TurnRecord | undefined {
+  if (sessionID === undefined) return undefined
+  return turns.find((t) => t.sessionID === sessionID)
+}
+
+/**
  * The collapsed sidebar line. One glance figure plus an affordance, not
  * nothing — collapsing to bare "view metrics" with no number defeats the
  * point of a glanceable panel. Derived from the most recent recorded turn

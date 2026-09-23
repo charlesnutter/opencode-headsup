@@ -12,6 +12,11 @@
   OpenCode turn is joined by a rejected ~0s title request, which halved the
   total (`0.32s` against OpenCode's own `649ms`). The engine's duration is
   now used only when exactly one was recorded; otherwise OpenCode's timing.
+- With several tabs open, a turn completing in one tab replaced every other
+  tab's sidebar line with `inference · —`. The sidebar kept one line for the
+  whole TUI; it now keeps one per session. The collapsed line had the same
+  fault and now uses its own session's latest turn. A turn in one tab can no
+  longer suppress another tab's line as out of order.
 - The history panel's legend said `*` rows were "engine-measured". Every row
   holds OpenCode's own figures; `*` only means the sidebar line for that turn
   came from the engine. The legend now says so.

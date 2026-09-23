@@ -30,7 +30,8 @@ import { appendFileSync } from "node:fs"
 import { short } from "./format"
 import type { HttpOptions } from "./http"
 import { universalLine, turnRate, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
-import { record, formatHistory, formatCollapsedLine, type History, type TurnRecord } from "./history"
+import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
+import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
 
 import { fetchMtplxLatest, formatMtplxLine } from "./adapters/mtplx"
 import { fetchOmlxSample, formatOmlxLine, type OmlxSample } from "./adapters/omlx"
@@ -146,18 +147,6 @@ interface Baselines {
   prom: Record<string, PromSample>
 }
 
-/** What the sidebar shows. Reactive — writing it re-renders the slot. */
-interface Panel {
-  text: string
-  /**
-   * The session `text` describes. `panel` is memory-scoped so it dies with
-   * the TUI, but it still outlives a switch to a different session inside
-   * one -- and a line describing another session's last turn reads as this
-   * one's.
-   */
-  sessionID?: string
-}
-
 /** Durable UI preference, independent of any one turn. */
 interface UiState {
   collapsed: boolean
@@ -187,8 +176,10 @@ export default Plugin.define({
     const life = new AbortController()
     off.push(() => life.abort())
 
-    const [panel, setPanel] = ctx.storage.memory<Panel>("panel", {
-      initial: { text: "inference · —" },
+    // What the sidebar shows, one line per session (see panels.ts). Reactive:
+    // writing it re-renders the slot. Memory-scoped, so it dies with the TUI.
+    const [panel, setPanel] = ctx.storage.memory<Panels>("panels", {
+      initial: emptyPanels(),
     })
     const [base, setBase] = ctx.storage.memory<Baselines>("baselines", {
       initial: { llamacpp: {}, splash: {}, koboldGens: {}, mlxServeId: {}, prom: {} },
@@ -210,10 +201,11 @@ export default Plugin.define({
       }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
     }
 
-    const show = (text: string, sessionID: string): void => {
+    const show = (text: string, sessionID: string, key: string): void => {
       setPanel((d) => {
-        d.text = text
-        d.sessionID = sessionID
+        const next = setLine(d, sessionID, text, key)
+        d.bySession = next.bySession
+        d.w = next.w
       })
     }
 
@@ -421,17 +413,15 @@ export default Plugin.define({
 
     // ---- turn completion ----------------------------------------------------
 
-    let lastKey = ""
-
-    // Monotonic guard against out-of-order renders. `report` awaits an engine
-    // fetch, so two turns completing close together race: whichever adapter
-    // answers last calls `show` last, which is not necessarily the later turn.
-    // The panel would then describe a turn that is not the one on screen --
-    // the same class of mistake as a session total read as per-turn.
-    let reportSeq = 0
+    // Monotonic guard against out-of-order renders, per session. `report`
+    // awaits an engine fetch, so two turns completing close together race:
+    // whichever adapter answers last calls `show` last, which is not
+    // necessarily the later turn. Per session, because a TUI-wide counter let
+    // a turn in one tab suppress another tab's line (see panels.ts).
+    const latest = new LatestPerKey()
 
     async function report(sessionID: string): Promise<void> {
-      const seq = ++reportSeq
+      const seq = latest.begin(sessionID)
       // `message.list()` is a union of message kinds and its tail after a turn
       // is an "idle" marker, not the reply — measured, see audit P1. Scan
       // backwards for the assistant message.
@@ -450,11 +440,11 @@ export default Plugin.define({
       const provider = info.model?.providerID ?? ""
       const model = info.model?.id ?? ""
       const key = `${provider}/${model}`
-      if (key !== lastKey) {
-        // A model or provider switch replaces the panel rather than blending
-        // two engines' figures into one reading.
-        show(`${provider}  ${short(model)}\n…`, sessionID)
-        lastKey = key
+      if (key !== keyFor(panel, sessionID)) {
+        // A model or provider switch replaces this session's line rather than
+        // blending two engines' figures into one reading. Per session, so a
+        // different model in another tab is not a switch here.
+        show(`${provider}  ${short(model)}\n…`, sessionID, key)
       }
 
       const turn = turns.get(info.id)
@@ -527,11 +517,11 @@ export default Plugin.define({
       // History is written unconditionally above -- every completed turn is a
       // real record. Only the panel is last-writer-wins, and only the latest
       // turn may claim it.
-      if (seq !== reportSeq) {
-        dbg(`report ${seq} superseded by ${reportSeq}, not rendering`)
+      if (!latest.isLatest(sessionID, seq)) {
+        dbg(`report ${seq} for ${sessionID} superseded, not rendering`)
         return
       }
-      show(line, sessionID)
+      show(line, sessionID, key)
     }
 
     // ---- subscriptions ------------------------------------------------------
@@ -645,7 +635,7 @@ export default Plugin.define({
           // here: this slot unmounts when the panel takes over the sidebar,
           // and a layer registered here died with it.
           render: (input) => {
-            // Reading `panel.text`/`ui.collapsed`/`history.turns` here, not
+            // Reading `panel`/`ui.collapsed`/`history.turns` here, not
             // captured outside, is what makes this reactive: a write to any
             // of them re-renders the slot. v1 needed a hand-rolled listener
             // set, an explicit requestRender, and an onCleanup to avoid
@@ -659,10 +649,8 @@ export default Plugin.define({
             return (
               <text selectable={false} onMouseDown={() => toggleCollapsed()}>
                 {ui.collapsed
-                  ? formatCollapsedLine(history.turns[0], input.sessionID)
-                  : panel.sessionID === input.sessionID
-                    ? panel.text
-                    : "inference · —"}
+                  ? formatCollapsedLine(latestFor(history.turns, input.sessionID), input.sessionID)
+                  : lineFor(panel, input.sessionID)}
               </text>
             )
           },

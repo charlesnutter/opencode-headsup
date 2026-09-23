@@ -6,7 +6,7 @@
 // that.
 // Run with: bun test/history.test.mjs
 import { strict as assert } from "node:assert"
-import { record, summarise, formatRow, formatHistory, formatCollapsedLine, HISTORY_CAP } from "../history.ts"
+import { record, summarise, formatRow, formatHistory, formatCollapsedLine, latestFor, HISTORY_CAP } from "../history.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -173,6 +173,21 @@ test("a turn from another session shows no figure, only the label", () => {
 test("a record predating session tracking shows no figure either", () => {
   // Written before `sessionID` existed: unattributable, so not attributed.
   assert.equal(formatCollapsedLine(turn({ rate: 38.1 }), SID), "▸ view metrics")
+})
+
+// Tabs: the collapsed line was built from `history.turns[0]`, the newest turn
+// from ANY session, then gated on the session -- so a newer turn in tab B
+// blanked tab A's glance figure, the same bug as the expanded panel had.
+test("the collapsed line uses this session's newest turn, not the TUI's", () => {
+  const turns = [
+    turn({ sessionID: "ses_b", rate: 11.1 }), // newest overall, other tab
+    turn({ sessionID: "ses_a", rate: 22.2 }),
+    turn({ sessionID: "ses_a", rate: 33.3 }),
+  ]
+  assert.equal(latestFor(turns, "ses_a").rate, 22.2)
+  assert.ok(formatCollapsedLine(latestFor(turns, "ses_a"), "ses_a").includes("22.2 tok/s"))
+  assert.equal(latestFor(turns, "ses_c"), undefined)
+  assert.equal(latestFor(turns, undefined), undefined)
 })
 
 console.log(`\n${passed} passed`)
