@@ -205,4 +205,21 @@ test("the session section sums each turn's sub-agents", () => {
   assert.equal(Object.fromEntries(sessionRows(s))["sub-agents"], "3 · 600 tok · $0.010")
 })
 
+test("sub-agent time is split out of other, not added on top", () => {
+  // 20s total: 4s generating, 2s waiting, 6s of sub-agents running, 8s other.
+  // The sub-agent span is real time inside the turn's total.
+  const s = summariseSession([row({ subagents: { count: 1, tokens: 50, spanS: 6 } }), row()], SID)
+  assert.equal(s.time.generating, 4 / 20)
+  assert.equal(s.time.waiting, 2 / 20)
+  assert.equal(s.time.subagents, 6 / 20)
+  assert.equal(s.time.other, 8 / 20)
+})
+
+test("the time row names sub-agents only when some ran", () => {
+  const with_ = Object.fromEntries(sessionRows(summariseSession([row({ subagents: { count: 1, tokens: 50, spanS: 6 } }), row()], SID)))
+  assert.equal(with_.time, "20% gen · 10% wait · 30% sub-agents · 40% other")
+  const without = Object.fromEntries(sessionRows(summariseSession([row(), row()], SID)))
+  assert.equal(without.time, "20% gen · 10% wait · 70% other")
+})
+
 console.log(`\n${passed} passed`)

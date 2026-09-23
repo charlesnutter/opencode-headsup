@@ -35,8 +35,12 @@ export interface SessionSummary {
   ttftMax?: number
   /** Cached prompt tokens over all prompt tokens. */
   cacheHit?: number
-  /** Shares of the counted turns' total time; they sum to 1. */
-  time?: { generating: number; waiting: number; other: number }
+  /**
+   * Shares of the counted turns' real total time; they sum to 1. `subagents`
+   * is time a sub-agent was running inside the turn (its span, real time),
+   * taken out of what would otherwise be `other` -- never added on top.
+   */
+  time?: { generating: number; waiting: number; subagents: number; other: number }
   retries: number
   engine?: { prefillTokS?: number; mtpX?: number; draftAccept?: number }
   /** Sub-agents across the counted turns: how many, their tokens and cost. */
@@ -152,15 +156,19 @@ export function summariseSession(
 
   let gen = 0
   let wait = 0
+  let sub = 0
   let total = 0
   for (const t of turns) {
     const s = streamOf(t)
     if (s === undefined || t.waitS === undefined || t.totalS === undefined || t.totalS <= 0) continue
     gen += s
     wait += t.waitS
+    // The parent is waiting on a tool while a sub-agent runs, so the span
+    // falls inside the turn's other time; capped so it can never exceed it.
+    sub += Math.min(t.subagents?.spanS ?? 0, Math.max(0, t.totalS - s - t.waitS))
     total += t.totalS
   }
-  const other = Math.max(0, total - gen - wait)
+  const other = Math.max(0, total - gen - wait - sub)
 
   const eng = (pick: (e: NonNullable<TurnRecord["engine"]>) => number | undefined): number | undefined =>
     mean(turns.map((t) => (t.engine ? pick(t.engine) : undefined)).filter((v): v is number => v !== undefined))
@@ -194,7 +202,10 @@ export function summariseSession(
     ttftMedian: median(ttfts),
     ttftMax: ttfts.length > 0 ? Math.max(...ttfts) : undefined,
     cacheHit: cacheTurns > 0 && prompt > 0 ? cached / prompt : undefined,
-    time: total > 0 ? { generating: gen / total, waiting: wait / total, other: other / total } : undefined,
+    time:
+      total > 0
+        ? { generating: gen / total, waiting: wait / total, subagents: sub / total, other: other / total }
+        : undefined,
     retries: turns.reduce((n, t) => n + (t.retries ?? 0), 0),
     engine:
       engine.prefillTokS !== undefined || engine.mtpX !== undefined || engine.draftAccept !== undefined
@@ -251,7 +262,10 @@ export function sessionRows(s: SessionSummary): Array<[string, string]> {
   }
   if (s.cacheHit !== undefined) rows.push(["cache", `${pct(s.cacheHit)} hit`])
   if (s.time) {
-    rows.push(["time", `${pct(s.time.generating)} gen · ${pct(s.time.waiting)} wait · ${pct(s.time.other)} other`])
+    const parts = [`${pct(s.time.generating)} gen`, `${pct(s.time.waiting)} wait`]
+    if (s.time.subagents > 0) parts.push(`${pct(s.time.subagents)} sub-agents`)
+    parts.push(`${pct(s.time.other)} other`)
+    rows.push(["time", parts.join(" · ")])
   }
   if (s.engine) {
     const e = [

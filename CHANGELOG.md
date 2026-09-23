@@ -14,7 +14,8 @@
   per-turn figures, `+2 sub-agents  4210 tok  38.10s  $0.012`: their tokens
   and cost summed, and the time from the first starting to the last
   finishing. Rates are never combined across them. The Session section
-  totals them in a `sub-agents` row.
+  totals them in a `sub-agents` row, and its time split gives the real time
+  sub-agents were running its own share instead of folding it into `other`.
 - `sessionBackground` option: the theme's offset shade behind the Session
   section.
 
