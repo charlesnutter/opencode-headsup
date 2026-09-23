@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.2.2] – 2026-09-22
 ### Fixed
 - `vllm`, `sglang`, `vllmmlx`, `aphrodite` and `lmdeploy` rendered figures
   for several requests as one turn's whenever other requests reached the
