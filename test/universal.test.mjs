@@ -8,7 +8,7 @@
 // counts never disagreed — only the rate's numerator did.
 // Run with: bun test/universal.test.mjs
 import { strict as assert } from "node:assert"
-import { turnRate, universalLine, DEFAULT_DISPLAY } from "../universal.ts"
+import { turnRate, universalLine, turnSteps, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -212,6 +212,90 @@ test("a negative ttft is suppressed too", () => {
 test("a normal ttft still survives the guard", () => {
   // Regression guard on the guard: the Splash turn must be unaffected.
   assert.ok(Math.abs(turnRate(1247, splashInfo, splashTurn).ttft - 0.66) < 0.001)
+})
+
+// ---- the whole turn, not its last step --------------------------------------
+// Measured (vllm-mlx, 2026-09-23): a tool-using turn was three assistant
+// messages -- 71/tool-calls, 105/tool-calls, 140/stop -- spanning 37.13s, and
+// OpenCode's own footer said 37.2s. The sidebar showed `140 tok  10.20s`: the
+// last step only, because it read one message.
+
+const T0 = 2_000_000
+const toolTurn = [
+  { type: "user", id: "u1" },
+  { type: "assistant", id: "a1", finish: "tool-calls", cost: 0.01,
+    tokens: { input: 7000, output: 50, reasoning: 21, cache: { read: 6000, write: 0 } },
+    time: { created: T0, completed: T0 + 12_000 } },
+  { type: "assistant", id: "a2", finish: "tool-calls", cost: 0.02,
+    tokens: { input: 7200, output: 80, reasoning: 25, cache: { read: 7000, write: 0 } },
+    time: { created: T0 + 14_000, completed: T0 + 26_930 } },
+  { type: "assistant", id: "a3", finish: "stop", cost: 0.03,
+    tokens: { input: 7500, output: 120, reasoning: 20, cache: { read: 7200, write: 0 } },
+    time: { created: T0 + 26_930, completed: T0 + 37_130 } },
+]
+const marks = new Map([
+  ["a1", { startAt: T0, firstAt: T0 + 7_400, lastAt: T0 + 12_000 }],
+  ["a2", { startAt: T0 + 14_000, firstAt: T0 + 20_000, lastAt: T0 + 26_930 }],
+  ["a3", { startAt: T0 + 26_930, firstAt: T0 + 34_000, lastAt: T0 + 37_130 }],
+])
+
+test("a turn is every assistant message since the last user message", () => {
+  const steps = turnSteps([{ type: "user", id: "u0" }, { type: "assistant", id: "old" }, ...toolTurn])
+  assert.deepEqual(steps.map((m) => m.id), ["a1", "a2", "a3"])
+})
+
+test("non-assistant entries inside a turn are skipped, not counted", () => {
+  const steps = turnSteps([...toolTurn.slice(0, 2), { type: "idle" }, ...toolTurn.slice(2)])
+  assert.equal(steps.length, 3)
+})
+
+test("the whole turn's tokens are summed, not the last step's", () => {
+  const { info } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.equal(info.tokens.output + info.tokens.reasoning, 316)
+  assert.equal(info.tokens.reasoning, 66)
+})
+
+test("the turn spans the first step's start to the last step's end", () => {
+  const { info } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.equal(info.time.completed - info.time.created, 37_130)
+  const line = universalLine("vllmmlx", "m", info, aggregateTurn(turnSteps(toolTurn), marks).turn)
+  assert.ok(line.includes("37.13s"), line)
+  assert.ok(line.includes("316 tok"), line)
+})
+
+test("ttft is the first step's, not the last step's", () => {
+  const { info, turn } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.ok(Math.abs(turnRate(316, info, turn).ttft - 7.4) < 0.001)
+})
+
+test("the decode rate is over the steps' own stream windows, excluding tool time", () => {
+  // 316 tokens over (4.6 + 6.93 + 3.13) = 14.66s of streaming, not 37.13s.
+  const { info, turn } = aggregateTurn(turnSteps(toolTurn), marks)
+  const r = turnRate(316, info, turn)
+  assert.equal(r.rateWindow, "decode")
+  assert.ok(Math.abs(r.decodeTokS - 316 / 14.66) < 0.01, String(r.decodeTokS))
+})
+
+test("cost and cache reuse are summed per turn; the prompt is the last step's", () => {
+  const { info } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.ok(Math.abs(info.cost - 0.06) < 1e-9)
+  assert.equal(info.tokens.cache.read, 20_200)
+  // The context the turn ended at, which is what a prompt/limit figure means.
+  assert.equal(info.tokens.input, 7500)
+})
+
+test("a step with no stream marks makes the rate whole-turn, labelled overall", () => {
+  const partial = new Map([...marks].filter(([k]) => k !== "a2"))
+  const { info, turn } = aggregateTurn(turnSteps(toolTurn), partial)
+  assert.equal(turnRate(316, info, turn).rateWindow, "whole")
+})
+
+test("a one-step turn aggregates to exactly that step", () => {
+  const one = [{ type: "user" }, toolTurn[3]]
+  const { info, turn } = aggregateTurn(turnSteps(one), marks)
+  assert.equal(info.tokens.output + info.tokens.reasoning, 140)
+  assert.equal(info.time.completed - info.time.created, 10_200)
+  assert.ok(Math.abs(turnRate(140, info, turn).decodeTokS - 140 / 3.13) < 0.01)
 })
 
 console.log(`\n${passed} passed`)

@@ -17,6 +17,13 @@ export interface Turn {
   startAt?: number // request start (message.time.created), for TTFT
   firstAt?: number // first streamed delta
   lastAt?: number // last streamed delta
+  /**
+   * Total streaming time in ms, when the turn is several steps. The span
+   * firstAt..lastAt then includes the time spent running tools between
+   * steps, so the decode window is the sum of each step's own window
+   * instead. 0 means at least one step could not be timed: no decode rate.
+   */
+  streamMs?: number
 }
 
 /**
@@ -65,7 +72,12 @@ export function turnRate(
       // not that.
       if (ttft <= 0 || (total !== undefined && ttft >= total)) ttft = undefined
     }
-    if (turn.firstAt !== undefined && turn.lastAt !== undefined && turn.lastAt > turn.firstAt && tokens > 0) {
+    if (turn.streamMs !== undefined) {
+      if (turn.streamMs > 0 && tokens > 0) {
+        decodeTokS = tokens / (turn.streamMs / 1000)
+        rateWindow = "decode"
+      }
+    } else if (turn.firstAt !== undefined && turn.lastAt !== undefined && turn.lastAt > turn.firstAt && tokens > 0) {
       decodeTokS = tokens / ((turn.lastAt - turn.firstAt) / 1000)
       rateWindow = "decode"
     }
@@ -80,6 +92,91 @@ export function turnRate(
     rateWindow = "whole"
   }
   return { decodeTokS, ttft, total, rateWindow }
+}
+
+/**
+ * The assistant messages that make up the latest turn: everything after the
+ * last user message, oldest first. A turn that calls tools is one message
+ * per step; measured on vllm-mlx, 71/tool-calls, 105/tool-calls, 140/stop.
+ * Reading only the last one showed `140 tok  10.20s` for a 316-token, 37s turn.
+ */
+export function turnSteps(
+  msgs: readonly ({ type?: string } | undefined)[]
+): SessionMessageAssistant[] {
+  const steps: SessionMessageAssistant[] = []
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (!m) continue
+    if (m.type === "user") break
+    if (m.type === "assistant") steps.unshift(m as SessionMessageAssistant)
+  }
+  return steps
+}
+
+/**
+ * One turn's figures from its steps, shaped like a single message so the
+ * universal line and `turnRate` need no second code path.
+ *
+ * - tokens, reasoning, cost and cache reuse are summed over the steps;
+ * - `input` is the LAST step's: the context the turn ended at, which is what
+ *   a prompt/limit figure means (summing would count the prompt per step);
+ * - the span runs from the first step's start to the last step's end, which
+ *   is what OpenCode's own footer measures (37.13s against its 37.2s);
+ * - ttft is the first step's; the decode window is the sum of each step's
+ *   own stream window, so tool execution between steps is not counted as
+ *   decoding. If any step has no marks, there is no decode window at all
+ *   (`streamMs` 0) and the rate falls back to whole-turn, labelled overall.
+ */
+export function aggregateTurn(
+  steps: readonly SessionMessageAssistant[],
+  marks: ReadonlyMap<string, Turn>
+): { info: SessionMessageAssistant | undefined; turn: Turn | undefined } {
+  const first = steps[0]
+  const last = steps[steps.length - 1]
+  if (!first || !last) return { info: undefined, turn: undefined }
+
+  let output = 0
+  let reasoning = 0
+  let cacheRead = 0
+  let cacheWrite = 0
+  let cost = 0
+  let sawCost = false
+  let streamMs = 0
+  let timed = true
+  for (const m of steps) {
+    output += m.tokens?.output ?? 0
+    reasoning += m.tokens?.reasoning ?? 0
+    cacheRead += m.tokens?.cache?.read ?? 0
+    cacheWrite += m.tokens?.cache?.write ?? 0
+    if (typeof m.cost === "number") {
+      cost += m.cost
+      sawCost = true
+    }
+    const t = marks.get(m.id)
+    if (t?.firstAt !== undefined && t.lastAt !== undefined && t.lastAt > t.firstAt) streamMs += t.lastAt - t.firstAt
+    else timed = false
+  }
+
+  const info: SessionMessageAssistant = {
+    ...last,
+    time: { created: first.time.created, completed: last.time?.completed },
+    tokens: {
+      input: last.tokens?.input ?? 0,
+      output,
+      reasoning,
+      cache: { read: cacheRead, write: cacheWrite },
+    },
+    cost: sawCost ? cost : undefined,
+  }
+  const firstMarks = marks.get(first.id)
+  const lastMarks = marks.get(last.id)
+  const turn: Turn = {
+    startAt: firstMarks?.startAt ?? first.time.created,
+    firstAt: firstMarks?.firstAt,
+    lastAt: lastMarks?.lastAt,
+    streamMs: timed ? streamMs : 0,
+  }
+  return { info, turn }
 }
 
 /**
