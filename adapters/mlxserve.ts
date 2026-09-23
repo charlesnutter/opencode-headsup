@@ -97,6 +97,12 @@ export interface MlxServeTurn {
    * token+time counters to aggregate the way Splash's do.
    */
   requests: number
+  /**
+   * Set when the turn was read step by step (`combineMlxServeSteps`): every
+   * request is then accounted for, one per step, and the "requests this
+   * turn" note -- which exists to flag a summed window -- does not apply.
+   */
+  steps?: number
 }
 
 /**
@@ -218,7 +224,62 @@ export function mlxServeTurn(
  * "N requests this turn" convention, since both exist for the identical real
  * scenario (an agentic turn's tool round trips landing between two polls).
  */
-export function formatMlxServeLine(t: MlxServeTurn, model: string): string {
+/**
+ * One turn from its steps, each read at that step's end: the newest usable
+ * record in that read is the step. Returns null unless every step's record
+ * is new -- not the previous step's, not the last one reported (`lastSeenId`)
+ * -- and its tokens equal OpenCode's own count for the step.
+ *
+ * Tokens are summed (prompt tokens only if every record has them); the rate
+ * is total tokens over total decode time, only when every step streamed;
+ * ttft is the first step's; a cold start in any step is flagged.
+ */
+export function combineMlxServeSteps(
+  steps: ReadonlyArray<{ records: MlxServeRequest[] | null; hostTokens: number }>,
+  lastSeenId?: string
+): MlxServeTurn | null {
+  const turns: MlxServeTurn[] = []
+  let prevId = lastSeenId
+  for (const { records, hostTokens } of steps) {
+    if (!records) return null
+    const t = mlxServeTurn(records, undefined) // newest usable record only
+    if (!t || t.requestId === prevId || t.completionTokens !== hostTokens) return null
+    prevId = t.requestId
+    turns.push(t)
+  }
+  const first = turns[0]
+  const last = turns[turns.length - 1]
+  if (!first || !last) return null
+  const completion = turns.reduce((n, t) => n + t.completionTokens, 0)
+  const decodeS = turns.every((t) => t.decodeTokS !== undefined && t.decodeTokS > 0)
+    ? turns.reduce((n, t) => n + t.completionTokens / (t.decodeTokS as number), 0)
+    : undefined
+  return {
+    requestId: last.requestId,
+    completionTokens: completion,
+    promptTokens: turns.every((t) => t.promptTokens !== undefined)
+      ? turns.reduce((n, t) => n + (t.promptTokens as number), 0)
+      : undefined,
+    decodeTokS: decodeS !== undefined && decodeS > 0 ? completion / decodeS : undefined,
+    overallTokS: undefined,
+    ttft: first.ttft,
+    totalS: turns.reduce((n, t) => n + t.totalS, 0),
+    streamed: turns.every((t) => t.streamed),
+    coldStart: turns.some((t) => t.coldStart),
+    requests: turns.length,
+    steps: turns.length,
+  }
+}
+
+/**
+ * `host.total` is the turn's total from OpenCode -- what the user waited,
+ * retries included -- and wins over the record's request duration.
+ */
+export function formatMlxServeLine(
+  t: MlxServeTurn,
+  model: string,
+  host: { total?: number; retries?: number } = {}
+): string {
   // decodeTokS and overallTokS are never both set; they are not comparable,
   // so the whole-request one is labelled rather than shown as a decode rate.
   const rate =
@@ -230,11 +291,13 @@ export function formatMlxServeLine(t: MlxServeTurn, model: string): string {
   return [
     `mlx-serve  ${short(model)}`,
     rate,
-    `${ni(t.completionTokens)} tok${t.promptTokens !== undefined ? `  ${ni(t.promptTokens)} prompt` : ""}  ${nn(t.totalS, 2)}s`,
+    `${ni(t.completionTokens)} tok${t.promptTokens !== undefined ? `  ${ni(t.promptTokens)} prompt` : ""}  ${nn(host.total ?? t.totalS, 2)}s${
+      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
+    }`,
     // A cold start loaded the model mid-request; without this the turn reads
     // as a tenfold slowdown rather than a one-off load.
     t.coldStart ? "cold start (model loaded)" : "",
-    t.requests > 1 ? `${ni(t.requests)} requests this turn` : "",
+    t.requests > 1 && t.steps === undefined ? `${ni(t.requests)} requests this turn` : "",
   ]
     .filter(Boolean)
     .join("\n")

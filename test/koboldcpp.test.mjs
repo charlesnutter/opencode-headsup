@@ -8,7 +8,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { parseKoboldPerf, koboldTurn, formatKoboldLine } from "../adapters/koboldcpp.ts"
+import { parseKoboldPerf, koboldTurn, formatKoboldLine, combineKoboldSteps } from "../adapters/koboldcpp.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const raw = (name) => JSON.parse(readFileSync(path.join(dir, "..", "fixtures", name), "utf8"))
@@ -186,6 +186,55 @@ test("KoboldCpp: a normal single-generation turn carries no such note", () => {
   const t = koboldTurn(after, after.total_gens - 1)
   const out = formatKoboldLine(t, "m")
   assert.ok(!out.includes("generations this turn"), out)
+})
+
+// ---- a turn read step by step ---------------------------------------------
+// /api/extra/perf holds only the last request, so a tool-using turn is read
+// at every step's end, while that step is still the last request. Timing is
+// verified live on MTPLX's equivalent endpoint, not on KoboldCpp (no
+// KoboldCpp server here); these receipts are two separate live captures.
+
+const stepA = parseKoboldPerf(raw("koboldcpp-novel-after.json")) // 40 tok, 2818-token prompt, gen 7
+// koboldcpp-after.json is a separate capture (83 tok) with total_gens 3; it is
+// renumbered to 8 so it reads as the generation after stepA.
+const stepB = { ...parseKoboldPerf(raw("koboldcpp-after.json")), total_gens: 8 }
+
+test("KoboldCpp steps: tokens are summed and each step must be its own", () => {
+  const t = combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: stepB, hostTokens: 83 }])
+  assert.equal(t.completionTokens, 123)
+  assert.equal(combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: stepB, hostTokens: 80 }]), null)
+  assert.equal(combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: null, hostTokens: 83 }]), null)
+})
+
+test("KoboldCpp steps: the same generation read twice is not a second step", () => {
+  // total_gens did not advance: the second read is still step one's receipt.
+  const again = { ...stepA }
+  assert.equal(combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: again, hostTokens: 40 }]), null)
+})
+
+test("KoboldCpp steps: the rate is total tokens over total engine decode time", () => {
+  const t = combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: stepB, hostTokens: 83 }])
+  const decodeS = 40 / stepA.last_eval_speed + 83 / stepB.last_eval_speed
+  assert.ok(Math.abs(t.decodeTokS - 123 / decodeS) < 1e-9, String(t.decodeTokS))
+})
+
+test("KoboldCpp steps: prefill is the first step's -- the one that read the context", () => {
+  const t = combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: stepB, hostTokens: 83 }])
+  assert.equal(t.prefillTokS, stepA.last_process_speed)
+})
+
+test("KoboldCpp steps: draft acceptance is total accepted over total drafted", () => {
+  const a = { ...stepA, last_draft_success: 30, last_draft_failed: 10 }
+  const b = { ...stepB, last_draft_success: 10, last_draft_failed: 30 }
+  const t = combineKoboldSteps([{ perf: a, hostTokens: 40 }, { perf: b, hostTokens: 83 }])
+  assert.equal(t.draftAcceptRate, 40 / 80)
+})
+
+test("KoboldCpp steps: nothing is dropped, so no 'last shown only' note", () => {
+  const t = combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: stepB, hostTokens: 83 }])
+  const out = formatKoboldLine(t, "m", 0.4, { total: 9.5, retries: 0 })
+  assert.ok(!out.includes("last shown only"), out)
+  assert.ok(out.includes("123 tok  9.50s"), `OpenCode's total, not the engine's phases:\n${out}`)
 })
 
 console.log(`\n${passed} passed`)

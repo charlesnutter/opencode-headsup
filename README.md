@@ -420,9 +420,14 @@ again. So for the Prometheus engines, a turn that shared its window shows
 the universal line with `engine data skipped: overlapping requests` rather
 than figures that describe several requests at once.
 
-`mtplx`, `koboldcpp` and `mlxserve` report the engine's latest request, so
-on a turn that calls tools their engine line describes the last step; the
-universal figures and the history row cover the whole turn.
+`mtplx`, `koboldcpp` and `mlxserve` report only the engine's latest
+request, so they are read at the end of every step and the steps' receipts
+combined: tokens summed, the rate over every step's decode time, TTFT and
+prefill from the first step, the step that read the context. Each receipt
+must match OpenCode's count for its step, or the turn shows the universal
+line with the notice. Verified live on MTPLX; KoboldCpp and mlx-serve are
+built from their live captures but not yet run step by step against a live
+server.
 
 ### Absent is not zero
 

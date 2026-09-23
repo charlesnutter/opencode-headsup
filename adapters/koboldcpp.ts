@@ -173,7 +173,70 @@ export function koboldTurn(now: KoboldPerf, prevTotalGens: number | undefined): 
  * prefill, where an engine stamps from the request reaching it. Same word,
  * different span, so it says which.
  */
-export function formatKoboldLine(t: KoboldTurn, model: string, hostTtft?: number): string {
+/**
+ * One turn from its steps' receipts, each read at that step's end while it
+ * is still the last request /api/extra/perf holds. Returns null unless every
+ * step has a receipt whose token count equals OpenCode's own for the step,
+ * and each receipt is a later generation than the one before (`total_gens`
+ * advanced) -- the same generation read twice is not a second step.
+ *
+ * Tokens are summed; the rate is total tokens over total engine decode time;
+ * prefill is the first step's, the step that read the context (decided
+ * 2026-09-23); draft acceptance is total accepted over total drafted. Every
+ * generation is accounted for, so `generationsInWindow` is left unset.
+ */
+export function combineKoboldSteps(
+  steps: ReadonlyArray<{ perf: KoboldPerf | null; hostTokens: number }>
+): KoboldTurn | null {
+  let firstTurn: KoboldTurn | undefined
+  let prevGens: number | undefined
+  let completion = 0
+  let prompt = 0
+  let decodeS = 0
+  let rated = true
+  let drafted = 0
+  let accepted = 0
+  let prefillS = 0
+  let evalS = 0
+  for (const { perf, hostTokens } of steps) {
+    if (!perf || perf.last_token_count !== hostTokens) return null
+    if (prevGens !== undefined && perf.total_gens <= prevGens) return null
+    prevGens = perf.total_gens
+    const t = koboldTurn(perf, undefined)
+    if (!t) return null
+    firstTurn ??= t
+    completion += t.completionTokens
+    prompt += t.promptTokens
+    if (t.decodeTokS !== undefined && t.decodeTokS > 0) decodeS += t.completionTokens / t.decodeTokS
+    else rated = false
+    drafted += perf.last_draft_success + perf.last_draft_failed
+    accepted += perf.last_draft_success
+    prefillS += t.prefillS
+    evalS += t.decodeS
+  }
+  if (!firstTurn) return null
+  return {
+    promptTokens: prompt,
+    completionTokens: completion,
+    decodeTokS: rated && decodeS > 0 ? completion / decodeS : undefined,
+    prefillTokS: firstTurn.prefillTokS,
+    prefillS,
+    decodeS: evalS,
+    draftAcceptRate: drafted > 0 ? accepted / drafted : undefined,
+    generationsInWindow: undefined,
+  }
+}
+
+/**
+ * `host.total` is the turn's total from OpenCode -- what the user waited,
+ * retries included -- and wins over the engine's prefill + decode time.
+ */
+export function formatKoboldLine(
+  t: KoboldTurn,
+  model: string,
+  hostTtft?: number,
+  host: { total?: number; retries?: number } = {}
+): string {
   // Host-derived, and labelled as such. No derived figure on this line takes
   // its numerator from one source and its denominator from the other -- ttft
   // is measured directly, so nothing crosses the seam.
@@ -182,7 +245,9 @@ export function formatKoboldLine(t: KoboldTurn, model: string, hostTtft?: number
     `KoboldCpp  ${short(model)}`,
     t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
-    `${ni(t.completionTokens)} tok  ${nn(t.prefillS + t.decodeS, 2)}s`,
+    `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.prefillS + t.decodeS, 2)}s${
+      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
+    }`,
     t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",
     t.generationsInWindow !== undefined && t.generationsInWindow > 1
       ? `${ni(t.generationsInWindow)} generations this turn (last shown only)`

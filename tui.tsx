@@ -41,14 +41,14 @@ import {
   formatLlamaCppLine,
   type LlamaCppCounters,
 } from "./adapters/llamacpp"
-import { fetchMlxServeRequests, mlxServeTurn, formatMlxServeLine } from "./adapters/mlxserve"
+import { fetchMlxServeRequests, mlxServeTurn, formatMlxServeLine, combineMlxServeSteps, type MlxServeRequest } from "./adapters/mlxserve"
 import {
   fetchSplashSample,
   diffSplashSamples,
   formatSplashLine,
   type SplashSample,
 } from "./adapters/splash"
-import { fetchKoboldPerf, koboldTurn, formatKoboldLine } from "./adapters/koboldcpp"
+import { fetchKoboldPerf, koboldTurn, formatKoboldLine, combineKoboldSteps, type KoboldPerf } from "./adapters/koboldcpp"
 import {
   fetchPromSample,
   diffPromSamples,
@@ -216,13 +216,16 @@ export default Plugin.define({
     // When each session's current execution started: the start of what the
     // user waits for, which the turn's total runs from (retries included).
     const execStart = new Map<string, number>()
-    // Per step: its provider (from session.step.started), and for MTPLX the
-    // receipt read at that step's end. A tool-using turn is one request per
-    // step and MTPLX's `latest` is one request, so it has to be read before
-    // the next step replaces it (measured: at step.ended it held that step,
-    // 62 then 138). Bounded like `turns`: an interrupted turn never reports.
+    // Per step: its provider and model (from session.step.started), and for
+    // engines that report their latest request -- MTPLX, KoboldCpp, mlx-serve
+    // -- a read taken at that step's end. A tool-using turn is one request
+    // per step, and those engines only hold the latest, so each has to be
+    // read before the next step replaces it (measured on MTPLX: at step.ended
+    // `latest` held that step, 62 then 138). Bounded like `turns`: an
+    // interrupted turn never reports.
     const stepProvider = new Map<string, string>()
-    const mtplxReads = new Map<string, Promise<MtplxLatest | null>>()
+    const stepModel = new Map<string, string>()
+    const stepReads = new Map<string, Promise<unknown>>()
     const bound = <V,>(m: Map<string, V>): void => {
       if (m.size > 64) {
         const oldest = m.keys().next().value
@@ -329,16 +332,24 @@ export default Plugin.define({
         return line
       }
 
+      // Every step's read from its end, or undefined when any step has none
+      // (the plugin loaded mid-turn, or the event was missed).
+      const stepTokens = (m: SessionMessageAssistant): number =>
+        (m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)
+      const perStep = async <T,>(): Promise<(T | null)[] | undefined> => {
+        const reads = steps.map((m) => stepReads.get(m.id))
+        if (steps.length === 0 || reads.some((r) => r === undefined)) return undefined
+        return (await Promise.all(reads)) as Array<T | null>
+      }
+      const hostFigures = { total: turnRate(0, info, turn).total, retries: turn?.retries }
+
       switch (provider) {
         case "mtplx": {
           // Each step's receipt, read at its end, checked against OpenCode's
           // own count for that step, and combined (see combineMtplxSteps).
-          const stepTokens = (m: SessionMessageAssistant): number =>
-            (m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)
-          const reads = steps.map((m) => mtplxReads.get(m.id))
-          let receipts: (MtplxLatest | null)[]
-          if (steps.length > 0 && reads.every((r) => r !== undefined)) {
-            receipts = await Promise.all(reads)
+          let receipts = await perStep<MtplxLatest>()
+          if (receipts) {
+            // read at every step's end
           } else if (steps.length === 1) {
             // No read at the step's end (the plugin loaded mid-turn): a
             // single-step turn can still be read now; a multi-step one can't.
@@ -355,8 +366,7 @@ export default Plugin.define({
             if (receipts.every((r) => r !== null)) tier2.sharedWindow = true
             return null
           }
-          const t = turnRate(0, info, turn)
-          return formatMtplxLine(combined, model, { total: t.total, retries: turn?.retries })
+          return formatMtplxLine(combined, model, hostFigures)
         }
 
         case "omlx": {
@@ -410,6 +420,27 @@ export default Plugin.define({
 
         case "koboldcpp":
         case "kobold": {
+          // Read at every step's end: each step's receipt, combined.
+          const perfs = await perStep<KoboldPerf>()
+          if (perfs) {
+            const combined = combineKoboldSteps(
+              steps.map((m, i) => ({ perf: perfs[i] ?? null, hostTokens: stepTokens(m) }))
+            )
+            match(combined?.completionTokens, `; steps ${steps.length}`)
+            const last = perfs[perfs.length - 1]
+            if (last) {
+              setBase((d) => {
+                d.koboldGens[cfg.koboldBase] = last.total_gens
+              })
+            }
+            if (!combined) {
+              if (perfs.every((p) => p !== null)) tier2.sharedWindow = true
+              return null
+            }
+            return formatKoboldLine(combined, model, hostTtft, hostFigures)
+          }
+          // No per-step reads: one read now, which can only describe the
+          // last request -- labelled as such when several landed.
           const perf = await fetchKoboldPerf(cfg.koboldBase, http)
           if (!perf) return null
           const prev = base.koboldGens[cfg.koboldBase]
@@ -423,6 +454,23 @@ export default Plugin.define({
 
         case "mlxserve":
         case "mlx-serve": {
+          // Read at every step's end: each step's newest record, combined.
+          const reads = await perStep<MlxServeRequest[]>()
+          if (reads) {
+            const combined = combineMlxServeSteps(
+              steps.map((m, i) => ({ records: reads[i] ?? null, hostTokens: stepTokens(m) })),
+              base.mlxServeId[cfg.mlxServeBase]
+            )
+            match(combined?.completionTokens, `; steps ${steps.length}`)
+            if (!combined) {
+              if (reads.every((r) => r !== null)) tier2.sharedWindow = true
+              return null
+            }
+            setBase((d) => {
+              d.mlxServeId[cfg.mlxServeBase] = combined.requestId
+            })
+            return formatMlxServeLine(combined, model, hostFigures)
+          }
           const recs = await fetchMlxServeRequests(
             cfg.mlxServeBase,
             model,
@@ -582,7 +630,8 @@ export default Plugin.define({
       for (const m of steps) {
         turns.delete(m.id)
         stepProvider.delete(m.id)
-        mtplxReads.delete(m.id)
+        stepModel.delete(m.id)
+        stepReads.delete(m.id)
       }
       dbg(`turns: size ${turns.size} after completing ${info.id}`)
       // History is written unconditionally above -- every completed turn is a
@@ -618,12 +667,16 @@ export default Plugin.define({
       // after prefill on MTPLX, so ttft is measured from the message instead.
       off.push(
         ctx.data.on("session.step.started", (evt) => {
-          const d = (evt as { data?: { assistantMessageID?: string; model?: { providerID?: string } } }).data
+          const d = (evt as { data?: { assistantMessageID?: string; model?: { providerID?: string; id?: string } } }).data
           const id = d?.assistantMessageID
           if (typeof id !== "string") return
           if (d?.model?.providerID) {
             stepProvider.set(id, d.model.providerID)
             bound(stepProvider)
+          }
+          if (d?.model?.id) {
+            stepModel.set(id, d.model.id)
+            bound(stepModel)
           }
           const t = turnFor(id)
           t.firstAt = undefined
@@ -640,11 +693,29 @@ export default Plugin.define({
       off.push(
         ctx.data.on("session.step.ended", (evt) => {
           const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
-          if (typeof id !== "string" || stepProvider.get(id) !== "mtplx") return
-          const read = fetchMtplxLatest(cfg.mtplxUrl, { signal: life.signal }).catch(() => null)
-          mtplxReads.set(id, read)
-          bound(mtplxReads)
-          read.then((l) => dbg(`  mtplx receipt at step.ended: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
+          if (typeof id !== "string") return
+          const provider = stepProvider.get(id)
+          const http: HttpOptions = { signal: life.signal }
+          let read: Promise<unknown> | undefined
+          if (provider === "mtplx") {
+            const r = fetchMtplxLatest(cfg.mtplxUrl, http).catch(() => null)
+            r.then((l) => dbg(`  mtplx receipt at step.ended: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
+            read = r
+          } else if (provider === "koboldcpp" || provider === "kobold") {
+            const r = fetchKoboldPerf(cfg.koboldBase, http).catch(() => null)
+            r.then((p) => dbg(`  koboldcpp receipt at step.ended: ${p?.last_token_count ?? "none"} tok`)).catch(() => {})
+            read = r
+          } else if (provider === "mlxserve" || provider === "mlx-serve") {
+            const r = fetchMlxServeRequests(cfg.mlxServeBase, stepModel.get(id), cfg.mlxServeKey || undefined, http).catch(
+              () => null
+            )
+            r.then((recs) => dbg(`  mlxserve receipt at step.ended: ${recs?.[0]?.completionTokens ?? "none"} tok`)).catch(() => {})
+            read = r
+          }
+          if (read) {
+            stepReads.set(id, read)
+            bound(stepReads)
+          }
         })
       )
       off.push(ctx.data.on("session.text.delta", mark))

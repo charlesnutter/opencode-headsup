@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { parseMlxServeRequests, mlxServeTurn, formatMlxServeLine } from "../adapters/mlxserve.ts"
+import { parseMlxServeRequests, mlxServeTurn, formatMlxServeLine, combineMlxServeSteps } from "../adapters/mlxserve.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const raw = (name) => JSON.parse(readFileSync(path.join(dir, "..", "fixtures", name), "utf8"))
@@ -187,6 +187,44 @@ test("mlx-serve: a normal single-record turn carries no such note", () => {
   const t = mlxServeTurn(recs, undefined)
   const out = formatMlxServeLine(t, "qwen05")
   assert.ok(!out.includes("requests this turn"), out)
+})
+
+// ---- a turn read step by step ---------------------------------------------
+// Each step's end reads the history; its newest usable record is that step.
+// The streamed fixture's two live records stand in for two steps: the older
+// (100 tok) as read after step one, then both (newest 94 tok) after step two.
+const all = records("mlxserve-streamed.json")
+const afterStep1 = all.slice(1)
+const afterStep2 = all
+
+test("mlx-serve steps: each step's newest record, summed and checked", () => {
+  const t = combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }, { records: afterStep2, hostTokens: 94 }])
+  assert.equal(t.completionTokens, 194)
+  assert.equal(t.requestId, all[0].requestId, "the last step's record, stored as the new baseline")
+  assert.equal(combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }, { records: afterStep2, hostTokens: 90 }]), null)
+})
+
+test("mlx-serve steps: the same record read for two steps is declined", () => {
+  // A step whose read shows no new record: its newest is still the last one.
+  assert.equal(combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }, { records: afterStep1, hostTokens: 100 }]), null)
+})
+
+test("mlx-serve steps: a record already reported last turn is not this turn's", () => {
+  assert.equal(combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }], afterStep1[0].requestId), null)
+})
+
+test("mlx-serve steps: the rate is total tokens over total decode time, ttft the first step's", () => {
+  const t = combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }, { records: afterStep2, hostTokens: 94 }])
+  const decodeS = 100 / all[1].tokensPerSecond + 94 / all[0].tokensPerSecond
+  assert.ok(Math.abs(t.decodeTokS - 194 / decodeS) < 1e-9, String(t.decodeTokS))
+  assert.ok(Math.abs(t.ttft - all[1].ttftMs / 1000) < 1e-9)
+})
+
+test("mlx-serve steps: every request accounted for, so no 'requests this turn' note", () => {
+  const t = combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }, { records: afterStep2, hostTokens: 94 }])
+  const out = formatMlxServeLine(t, "qwen05", { total: 12.0, retries: 1 })
+  assert.ok(!out.includes("requests this turn"), out)
+  assert.ok(out.includes("194 tok  12.00s (1 retry)"), out)
 })
 
 console.log(`\n${passed} passed`)

@@ -6,8 +6,14 @@
   step, MTP acceptance weighted across steps. Each step's receipt must match
   OpenCode's count for that step; if one doesn't, the turn shows the
   universal line with the overlapping-requests notice.
-- The `mtplx` line's total is OpenCode's -- what you waited, retries named --
-  rather than the engine's duration for its latest request.
+- `koboldcpp` and `mlxserve` are read the same way: at the end of every
+  step, combined across the turn, each step checked against OpenCode's
+  count. KoboldCpp's `N generations this turn (last shown only)` no longer
+  appears on turns read step by step, since nothing is dropped. Built from
+  live captures; not yet run step by step against a live server.
+- The `mtplx`, `koboldcpp` and `mlxserve` totals are OpenCode's -- what you
+  waited, retries named -- rather than the engine's duration for its latest
+  request.
 
 ## [0.2.3] – 2026-09-23
 ### Changed
