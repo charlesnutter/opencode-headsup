@@ -1,3 +1,14 @@
+## [Unreleased]
+### Changed
+- `mtplx` is read at the end of every step, not once per turn, so a turn
+  that calls tools shows engine figures for the whole turn: tokens summed,
+  the rate over every step's decode time, TTFT and prefill from the first
+  step, MTP acceptance weighted across steps. Each step's receipt must match
+  OpenCode's count for that step; if one doesn't, the turn shows the
+  universal line with the overlapping-requests notice.
+- The `mtplx` line's total is OpenCode's -- what you waited, retries named --
+  rather than the engine's duration for its latest request.
+
 ## [0.2.3] – 2026-09-23
 ### Changed
 - A turn that calls tools is now measured as the whole turn, not its last

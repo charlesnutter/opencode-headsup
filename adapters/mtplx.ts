@@ -40,12 +40,81 @@ const num = (v: unknown): number | undefined =>
  * whose figure is missing. A shorter block is correct; a block padded with
  * "?" is not.
  */
-export function formatMtplxLine(l: MtplxLatest, model: string): string {
+/**
+ * One turn's receipt from its steps' receipts, read one per step at each
+ * `session.step.ended` (measured: `latest` equalled the step's own count at
+ * that moment, 62 then 138, on a live two-step turn).
+ *
+ * Returns null unless every step has a receipt whose `completion_tokens`
+ * equals OpenCode's own count for that step: a receipt that isn't the step's
+ * -- OpenCode's title request finishing after it, another client -- declines
+ * the whole turn rather than contributing to it.
+ *
+ * - tokens and verify passes are summed;
+ * - the rate is total tokens over total decode time, so generation only;
+ *   a step without a rate leaves the turn without one;
+ * - ttft and prefill are the FIRST step's: the step that read the context.
+ *   Later steps mostly hit the prompt cache, and a blend would be pulled
+ *   around by their tiny prefills (decided 2026-09-23);
+ * - per-depth acceptance is weighted by each step's verify passes;
+ * - `request_elapsed_s` is dropped: a turn's total is the host's.
+ */
+export function combineMtplxSteps(
+  steps: ReadonlyArray<{ receipt: MtplxLatest | null; hostTokens: number }>
+): MtplxLatest | null {
+  const first = steps[0]
+  if (!first?.receipt) return null
+  let tokens = 0
+  let decodeS = 0
+  let rated = true
+  let verify = 0
+  let verified = true
+  const depthSum: number[] = []
+  let depthWeight = 0
+  for (const { receipt, hostTokens } of steps) {
+    const t = num(receipt?.completion_tokens)
+    if (!receipt || t === undefined || t !== hostTokens) return null
+    tokens += t
+    const rate = num(receipt.decode_tok_s)
+    if (rate !== undefined && rate > 0) decodeS += t / rate
+    else rated = false
+    const v = num(receipt.verify_calls)
+    if (v !== undefined) verify += v
+    else verified = false
+    const depths = receipt.mean_accept_probability_by_depth
+    if (Array.isArray(depths) && v !== undefined && v > 0) {
+      depths.forEach((d, i) => (depthSum[i] = (depthSum[i] ?? 0) + d * v))
+      depthWeight += v
+    }
+  }
+  return {
+    completion_tokens: tokens,
+    decode_tok_s: rated && decodeS > 0 ? tokens / decodeS : undefined,
+    ttft_s: first.receipt.ttft_s,
+    prefill_tok_s: first.receipt.prefill_tok_s,
+    request_elapsed_s: undefined,
+    verify_calls: verified ? verify : undefined,
+    mean_accept_probability_by_depth: depthWeight > 0 ? depthSum.map((d) => d / depthWeight) : undefined,
+  }
+}
+
+/**
+ * `host.total` is the turn's total from OpenCode -- what the user waited,
+ * retries included -- and wins over the receipt's `request_elapsed_s`,
+ * which is one request's duration.
+ */
+export function formatMtplxLine(
+  l: MtplxLatest,
+  model: string,
+  host: { total?: number; retries?: number } = {}
+): string {
   const decode = num(l.decode_tok_s)
   const ttft = num(l.ttft_s)
   const prefill = num(l.prefill_tok_s)
   const completion = num(l.completion_tokens)
-  const elapsed = num(l.request_elapsed_s)
+  const elapsed = host.total ?? num(l.request_elapsed_s)
+  const r = host.retries ?? 0
+  const retries = r > 0 ? ` (${r} ${r === 1 ? "retry" : "retries"})` : ""
   const verify = num(l.verify_calls)
 
   // Rate and TTFT share a line but are independently available: an
@@ -78,7 +147,7 @@ export function formatMtplxLine(l: MtplxLatest, model: string): string {
   // tokensLabel can render elsewhere is unavailable here.
   const totals =
     completion !== undefined
-      ? `${ni(completion)} tok${elapsed !== undefined ? `  ${nn(elapsed, 2)}s` : ""}`
+      ? `${ni(completion)} tok${elapsed !== undefined ? `  ${nn(elapsed, 2)}s${retries}` : ""}`
       : ""
 
   return [

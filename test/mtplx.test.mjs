@@ -27,7 +27,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { formatMtplxLine } from "../adapters/mtplx.ts"
+import { formatMtplxLine, combineMtplxSteps } from "../adapters/mtplx.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const fixture = (name) => JSON.parse(readFileSync(path.join(dir, "..", "fixtures", name), "utf8"))
@@ -130,6 +130,80 @@ test("NaN is treated as absent, not rendered", () => {
   const out = formatMtplxLine({ decode_tok_s: NaN, prefill_tok_s: NaN, completion_tokens: 22 }, MODEL)
   assert.ok(!out.includes("?"), out)
   assert.ok(!out.includes("prefill"))
+})
+
+// ---- a turn read step by step ---------------------------------------------
+// MTPLX's `latest` is one request. A tool-using turn is one request per step,
+// so each step's receipt is read at that step's end (measured: `latest`
+// equalled the step's own count at step.ended, 62 then 138, on a live turn)
+// and the receipts are combined here. Each must match OpenCode's own count
+// for its step, or the turn is declined.
+
+const stepA = completed.latest // live capture: 64 tok, 30.46 tok/s, 24 verifies
+// Measured step 2 of a live tool turn (sidebar receipt, 2026-09-23). The
+// verify count and depth figures are that receipt's MTP line: 3.45x -> 40.
+const stepB = { completion_tokens: 138, decode_tok_s: 36.2, ttft_s: 0.66, prefill_tok_s: 287,
+  request_elapsed_s: 4.48, verify_calls: 40, mean_accept_probability_by_depth: [0.92, 0.89, 0.72] }
+
+test("one step combines to exactly that step", () => {
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }])
+  assert.equal(c.completion_tokens, 64)
+  assert.equal(c.decode_tok_s, stepA.decode_tok_s)
+  assert.equal(c.ttft_s, stepA.ttft_s)
+  assert.equal(c.prefill_tok_s, stepA.prefill_tok_s)
+})
+
+test("two steps sum their tokens and verify passes", () => {
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 138 }])
+  assert.equal(c.completion_tokens, 202)
+  assert.equal(c.verify_calls, 64)
+})
+
+test("the rate is total tokens over total decode time -- generation only", () => {
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 138 }])
+  const decodeS = 64 / stepA.decode_tok_s + 138 / 36.2
+  assert.ok(Math.abs(c.decode_tok_s - 202 / decodeS) < 1e-9, String(c.decode_tok_s))
+})
+
+test("ttft and prefill are the first step's -- the one that read the context", () => {
+  // Decided 2026-09-23: later steps mostly hit the prompt cache, so a blend
+  // would be pulled around by tiny prefills; the first step's is exact.
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 138 }])
+  assert.equal(c.ttft_s, stepA.ttft_s)
+  assert.equal(c.prefill_tok_s, stepA.prefill_tok_s)
+})
+
+test("per-depth acceptance is weighted by each step's verify passes", () => {
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 138 }])
+  const a = stepA.mean_accept_probability_by_depth
+  const want = [0, 1, 2].map((i) => (a[i] * 24 + stepB.mean_accept_probability_by_depth[i] * 40) / 64)
+  c.mean_accept_probability_by_depth.forEach((v, i) => assert.ok(Math.abs(v - want[i]) < 1e-9))
+})
+
+test("a step whose receipt is not its own declines the whole turn", () => {
+  // e.g. OpenCode's title request finished after the step and became `latest`.
+  assert.equal(combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 100 }]), null)
+})
+
+test("a step with no receipt at all declines the whole turn", () => {
+  assert.equal(combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: null, hostTokens: 138 }]), null)
+  assert.equal(combineMtplxSteps([]), null)
+})
+
+test("a step without a decode rate leaves the turn without one, not a partial one", () => {
+  const noRate = { ...stepB, decode_tok_s: undefined }
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: noRate, hostTokens: 138 }])
+  assert.equal(c.completion_tokens, 202)
+  assert.equal(c.decode_tok_s, undefined)
+})
+
+test("the total shown is OpenCode's -- what you waited -- with retries named", () => {
+  // MTPLX's request_elapsed_s is one request; a turn's total spans every
+  // step and the tool time between them, which only the host has.
+  const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 138 }])
+  const out = formatMtplxLine(c, MODEL, { total: 7.0, retries: 2 })
+  assert.ok(out.includes("202 tok  7.00s (2 retries)"), out)
+  assert.ok(!out.includes("4.48"), out)
 })
 
 console.log(`\n${passed} passed`)

@@ -33,7 +33,7 @@ import { universalLine, turnRate, turnSteps, aggregateTurn, type Turn, type Disp
 import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
 
-import { fetchMtplxLatest, formatMtplxLine } from "./adapters/mtplx"
+import { fetchMtplxLatest, formatMtplxLine, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, formatOmlxLine, type OmlxSample } from "./adapters/omlx"
 import {
   fetchLlamaCppCounters,
@@ -216,6 +216,19 @@ export default Plugin.define({
     // When each session's current execution started: the start of what the
     // user waits for, which the turn's total runs from (retries included).
     const execStart = new Map<string, number>()
+    // Per step: its provider (from session.step.started), and for MTPLX the
+    // receipt read at that step's end. A tool-using turn is one request per
+    // step and MTPLX's `latest` is one request, so it has to be read before
+    // the next step replaces it (measured: at step.ended it held that step,
+    // 62 then 138). Bounded like `turns`: an interrupted turn never reports.
+    const stepProvider = new Map<string, string>()
+    const mtplxReads = new Map<string, Promise<MtplxLatest | null>>()
+    const bound = <V,>(m: Map<string, V>): void => {
+      if (m.size > 64) {
+        const oldest = m.keys().next().value
+        if (oldest !== undefined) m.delete(oldest)
+      }
+    }
     const turnFor = (id: string): Turn => {
       let t = turns.get(id)
       if (!t) {
@@ -255,7 +268,9 @@ export default Plugin.define({
        * other requests besides this turn: the engine figures were declined
        * as unattributable, and the line should say why they are missing.
        */
-      tier2: { pendingBaseline: boolean; sharedWindow: boolean }
+      tier2: { pendingBaseline: boolean; sharedWindow: boolean },
+      /** The turn's assistant messages, one per step, oldest first. */
+      steps: readonly SessionMessageAssistant[]
     ): Promise<string | null> {
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
@@ -316,9 +331,32 @@ export default Plugin.define({
 
       switch (provider) {
         case "mtplx": {
-          const latest = await fetchMtplxLatest(cfg.mtplxUrl, http)
-          if (latest) match(latest.completion_tokens)
-          return latest ? formatMtplxLine(latest, model) : null
+          // Each step's receipt, read at its end, checked against OpenCode's
+          // own count for that step, and combined (see combineMtplxSteps).
+          const stepTokens = (m: SessionMessageAssistant): number =>
+            (m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)
+          const reads = steps.map((m) => mtplxReads.get(m.id))
+          let receipts: (MtplxLatest | null)[]
+          if (steps.length > 0 && reads.every((r) => r !== undefined)) {
+            receipts = await Promise.all(reads)
+          } else if (steps.length === 1) {
+            // No read at the step's end (the plugin loaded mid-turn): a
+            // single-step turn can still be read now; a multi-step one can't.
+            receipts = [await fetchMtplxLatest(cfg.mtplxUrl, http)]
+          } else {
+            return null
+          }
+          const combined = combineMtplxSteps(
+            steps.map((m, i) => ({ receipt: receipts[i] ?? null, hostTokens: stepTokens(m) }))
+          )
+          match(combined?.completion_tokens, `; steps ${steps.length}`)
+          if (!combined) {
+            // Receipts that exist but are not the steps' own: say why.
+            if (receipts.every((r) => r !== null)) tier2.sharedWindow = true
+            return null
+          }
+          const t = turnRate(0, info, turn)
+          return formatMtplxLine(combined, model, { total: t.total, retries: turn?.retries })
         }
 
         case "omlx": {
@@ -482,7 +520,7 @@ export default Plugin.define({
       const tier2 = { pendingBaseline: false, sharedWindow: false }
       let line: string | null = null
       try {
-        line = await enrich(provider, model, info, turn, http, tier2)
+        line = await enrich(provider, model, info, turn, http, tier2, steps)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -541,7 +579,11 @@ export default Plugin.define({
       // Every step's marks, not just the last: deleting only the last left one
       // entry per earlier step behind (measured: `turns: size 1` after a
       // two-step turn), to be swept only by the 64-entry bound.
-      for (const m of steps) turns.delete(m.id)
+      for (const m of steps) {
+        turns.delete(m.id)
+        stepProvider.delete(m.id)
+        mtplxReads.delete(m.id)
+      }
       dbg(`turns: size ${turns.size} after completing ${info.id}`)
       // History is written unconditionally above -- every completed turn is a
       // real record. Only the panel is last-writer-wins, and only the latest
@@ -576,8 +618,13 @@ export default Plugin.define({
       // after prefill on MTPLX, so ttft is measured from the message instead.
       off.push(
         ctx.data.on("session.step.started", (evt) => {
-          const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
+          const d = (evt as { data?: { assistantMessageID?: string; model?: { providerID?: string } } }).data
+          const id = d?.assistantMessageID
           if (typeof id !== "string") return
+          if (d?.model?.providerID) {
+            stepProvider.set(id, d.model.providerID)
+            bound(stepProvider)
+          }
           const t = turnFor(id)
           t.firstAt = undefined
           t.lastAt = undefined
@@ -588,6 +635,16 @@ export default Plugin.define({
         ctx.data.on("session.execution.started", (evt) => {
           const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
           if (typeof sid === "string") execStart.set(sid, Date.now())
+        })
+      )
+      off.push(
+        ctx.data.on("session.step.ended", (evt) => {
+          const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
+          if (typeof id !== "string" || stepProvider.get(id) !== "mtplx") return
+          const read = fetchMtplxLatest(cfg.mtplxUrl, { signal: life.signal }).catch(() => null)
+          mtplxReads.set(id, read)
+          bound(mtplxReads)
+          read.then((l) => dbg(`  mtplx receipt at step.ended: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
         })
       )
       off.push(ctx.data.on("session.text.delta", mark))
@@ -601,7 +658,6 @@ export default Plugin.define({
         type Tok = { input?: number; output?: number; reasoning?: number }
         const tk = (t: Tok | undefined): string =>
           t ? `out ${t.output ?? 0} + think ${t.reasoning ?? 0}, in ${t.input ?? 0}` : "no tokens"
-        const stepProvider = new Map<string, string>()
         off.push(
           ctx.data.on("session.execution.started", (evt) => {
             dbg(`event execution.started ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
@@ -610,7 +666,6 @@ export default Plugin.define({
         off.push(
           ctx.data.on("session.step.started", (evt) => {
             const d = (evt as { data?: { assistantMessageID?: string; model?: { providerID?: string; id?: string } } }).data
-            if (d?.assistantMessageID) stepProvider.set(d.assistantMessageID, d.model?.providerID ?? "?")
             dbg(`event step.started ${d?.assistantMessageID ?? "?"} ${d?.model?.providerID ?? "?"}/${d?.model?.id ?? "?"}`)
           })
         )
@@ -619,14 +674,9 @@ export default Plugin.define({
             const d = (evt as { data?: { assistantMessageID?: string; finish?: string; tokens?: Tok } }).data
             const id = d?.assistantMessageID ?? "?"
             const provider = stepProvider.get(id) ?? "?"
-            stepProvider.delete(id)
             dbg(`event step.ended ${id} ${d?.finish ?? "?"}; ${tk(d?.tokens)}`)
             const http: HttpOptions = { signal: life.signal }
-            if (provider === "mtplx") {
-              fetchMtplxLatest(cfg.mtplxUrl, http)
-                .then((l) => dbg(`  probe mtplx latest at step.ended: ${l?.completion_tokens ?? "none"} tok`))
-                .catch(() => {})
-            } else if (provider === "vllmmlx" || provider === "vllm-mlx") {
+            if (provider === "vllmmlx" || provider === "vllm-mlx") {
               fetchPromSample(cfg.vllmMlxBase, VLLM_MLX_SPEC, http)
                 .then((p) =>
                   dbg(
