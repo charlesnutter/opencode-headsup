@@ -581,6 +581,54 @@ export default Plugin.define({
       off.push(ctx.data.on("session.text.delta", mark))
       off.push(ctx.data.on("session.reasoning.delta", mark))
 
+      // Diagnostics only (OPENCODE_HUD_DEBUG): the per-step events, to design
+      // reading the engine once per step instead of once per turn. On
+      // step.ended it also reads MTPLX's `latest` or vllm-mlx's counters, to
+      // see whether the engine has already recorded the step by then.
+      if (HUD_DEBUG) {
+        type Tok = { input?: number; output?: number; reasoning?: number }
+        const tk = (t: Tok | undefined): string =>
+          t ? `out ${t.output ?? 0} + think ${t.reasoning ?? 0}, in ${t.input ?? 0}` : "no tokens"
+        const stepProvider = new Map<string, string>()
+        off.push(
+          ctx.data.on("session.execution.started", (evt) => {
+            dbg(`event execution.started ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.step.started", (evt) => {
+            const d = (evt as { data?: { assistantMessageID?: string; model?: { providerID?: string; id?: string } } }).data
+            if (d?.assistantMessageID) stepProvider.set(d.assistantMessageID, d.model?.providerID ?? "?")
+            dbg(`event step.started ${d?.assistantMessageID ?? "?"} ${d?.model?.providerID ?? "?"}/${d?.model?.id ?? "?"}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.step.ended", (evt) => {
+            const d = (evt as { data?: { assistantMessageID?: string; finish?: string; tokens?: Tok } }).data
+            const id = d?.assistantMessageID ?? "?"
+            const provider = stepProvider.get(id) ?? "?"
+            stepProvider.delete(id)
+            dbg(`event step.ended ${id} ${d?.finish ?? "?"}; ${tk(d?.tokens)}`)
+            const http: HttpOptions = { signal: life.signal }
+            if (provider === "mtplx") {
+              fetchMtplxLatest(cfg.mtplxUrl, http)
+                .then((l) => dbg(`  probe mtplx latest at step.ended: ${l?.completion_tokens ?? "none"} tok`))
+                .catch(() => {})
+            } else if (provider === "vllmmlx" || provider === "vllm-mlx") {
+              fetchPromSample(cfg.vllmMlxBase, VLLM_MLX_SPEC, http)
+                .then((p) =>
+                  dbg(
+                    `  probe vllmmlx at step.ended: generation ${p?.generation ?? "?"}, ttft count ${p?.ttftCount ?? "?"}, duration count ${p?.durationCount ?? "?"}`
+                  )
+                )
+                .catch(() => {})
+            }
+          })
+        )
+        // `session.usage.recorded` (title/compaction usage) exists in the SDK
+        // types but is not in the TUI plugin's subscribable event union.
+      }
+
       // `session.idle` never fires — subscribed across four turns in Phase 0
       // with zero firings. This is the real turn-completion event.
       off.push(
