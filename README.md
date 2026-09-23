@@ -42,10 +42,6 @@ Restart OpenCode. The panel appears in the sidebar footer after the first
 turn. `opencode plugin list` shows what is installed; `plugin update` and
 `plugin remove` handle the rest.
 
-`npm install` does **not** work: it writes a `node_modules` OpenCode never
-reads. Installing has to go through OpenCode so the plugin lands in its own
-configuration.
-
 Equivalent, if you keep your config in version control:
 
 ```jsonc
@@ -387,10 +383,13 @@ Same shape for any OpenAI-compatible server:
 ### tok/s is generation speed; the total is what you waited
 
 `tok/s` is tokens over the time spent streaming after the first token —
-raw generation speed. OpenCode's own status line divides tokens by the
-whole turn instead; on a turn with a long wait before the first token the
-two differ by ~10x (measured: 38.1 tok/s over a 0.97s decode window
-against 3.7 over the same turn's 10.03s). Both are correct; the TTFT
+raw generation speed. OpenCode's own tok/s, in the footer under each turn,
+divides by each step's time from the request to the end of streaming: it
+leaves out time spent running tools, but includes prefill and the wait for
+the first token. On a turn with a long wait before the first token the two
+differ widely (measured: 38.1 tok/s over a 0.97s decode window against 3.7
+over the same turn's 10.03s; on MTPLX with a 17.6s prefill, 35.2 against
+OpenCode's 13.1). Both are correct; the TTFT
 beside the rate is what reconciles them. A turn that cannot be timed
 from its stream shows no rate rather than a whole-turn figure.
 
