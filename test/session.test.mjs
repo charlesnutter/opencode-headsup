@@ -6,7 +6,7 @@
 // models, and an engine-only figure is averaged only over turns that had it.
 // Run with: bun test/session.test.mjs
 import { strict as assert } from "node:assert"
-import { summariseSession, sessionHeading, sessionRows, sparkline } from "../session.ts"
+import { summariseSession, sessionHeading, sessionRows, sparkline, rollupSubagents, formatSubagentLine } from "../session.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -155,6 +155,54 @@ test("the sparkline scales between the lowest and highest rate", () => {
   assert.equal(sparkline([10, 20, 30]), "▁▅█")
   assert.equal(sparkline([5, 5]), "▄▄", "a flat trend sits mid-height")
   assert.equal(sparkline([7]), "", "one point is not a trend")
+})
+
+// ---- sub-agents ---------------------------------------------------------------
+// A sub-agent runs in its own child session, so its turns are recorded under
+// that session, not the parent's (measured: the parent's family listed the
+// child with 1 history row when the parent's turn ended, 11s after the child
+// finished). The roll-up adds up the child rows that finished during the
+// parent's turn.
+const child = (over = {}) => row({ sessionID: "ses_child", at: 20_000, totalS: 25, tokens: 228, cost: 0.004, ...over })
+
+test("sub-agent rows that finished during the turn are rolled up", () => {
+  const r = rollupSubagents([child(), child({ sessionID: "ses_other_child", tokens: 100, at: 30_000, totalS: 5 })],
+    ["ses_child", "ses_other_child"], 0, 40_000)
+  assert.equal(r.count, 2)
+  assert.equal(r.tokens, 328)
+  assert.ok(Math.abs(r.cost - 0.004 * 2) < 1e-12)
+})
+
+test("a sub-agent row from an earlier turn is not this turn's", () => {
+  assert.equal(rollupSubagents([child({ at: 5_000 })], ["ses_child"], 10_000, 40_000), undefined)
+})
+
+test("rows of sessions that are not this session's sub-agents are ignored", () => {
+  assert.equal(rollupSubagents([child()], ["ses_somebody_else"], 0, 40_000), undefined)
+})
+
+test("sub-agent time is the span they ran, not a sum -- they can run in parallel", () => {
+  // Two 10s sub-agents side by side, both finishing at 20s: 10s of wall time, not 20.
+  const r = rollupSubagents(
+    [child({ at: 20_000, totalS: 10 }), child({ sessionID: "ses_b", at: 20_000, totalS: 10 })],
+    ["ses_child", "ses_b"], 0, 40_000)
+  assert.equal(r.spanS, 10)
+})
+
+test("the per-turn line sums tokens, time and cost but never a rate", () => {
+  const r = rollupSubagents([child()], ["ses_child"], 0, 40_000)
+  const line = formatSubagentLine(r)
+  assert.equal(line, "+1 sub-agent  228 tok  25.00s  $0.0040")
+  assert.ok(!line.includes("tok/s"))
+})
+
+test("the session section sums each turn's sub-agents", () => {
+  const s = summariseSession(
+    [row({ subagents: { count: 2, tokens: 500, spanS: 30, cost: 0.01 } }), row(), row({ subagents: { count: 1, tokens: 100, spanS: 5 } })],
+    SID
+  )
+  assert.deepEqual(s.subagents, { count: 3, tokens: 600, cost: 0.01 })
+  assert.equal(Object.fromEntries(sessionRows(s))["sub-agents"], "3 · 600 tok · $0.010")
 })
 
 console.log(`\n${passed} passed`)

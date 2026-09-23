@@ -70,6 +70,12 @@ export interface TurnRecord {
    * turn was accepted -- so a session average of them covers only such
    * turns. Every other figure in the row is OpenCode's own.
    */
+  /**
+   * Sub-agents that ran during this turn, each in its own child session:
+   * their summed tokens and cost, and the span they ran (they can run in
+   * parallel, so not a sum). Rates are never combined across them.
+   */
+  subagents?: { count: number; tokens: number; spanS: number; cost?: number }
   engine?: {
     prefillTokS?: number
     /** Tokens committed per verify pass (MTPLX's multi-token prediction). */

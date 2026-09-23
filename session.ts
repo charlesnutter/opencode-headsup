@@ -14,7 +14,7 @@
 // OpenCode's own sidebar already shows the session's tokens, % context used
 // and $ spent, so those are deliberately not repeated here.
 
-import { nn, ni, short } from "./format"
+import { nn, ni, short, money } from "./format"
 import type { TurnRecord } from "./history"
 
 /** Recent turns shown in the generation trend. */
@@ -39,6 +39,54 @@ export interface SessionSummary {
   time?: { generating: number; waiting: number; other: number }
   retries: number
   engine?: { prefillTokS?: number; mtpX?: number; draftAccept?: number }
+  /** Sub-agents across the counted turns: how many, their tokens and cost. */
+  subagents?: { count: number; tokens: number; cost?: number }
+}
+
+export type SubagentRollup = NonNullable<TurnRecord["subagents"]>
+
+/**
+ * The sub-agents of one turn: history rows of this session's sub-agent
+ * sessions (`childIDs`) that finished inside the turn (`since`..`until`,
+ * epoch ms). Tokens and cost are summed; the time is the span from the
+ * first one starting to the last one finishing, since sub-agents can run in
+ * parallel. Undefined when none ran.
+ */
+export function rollupSubagents(
+  history: readonly TurnRecord[],
+  childIDs: readonly string[],
+  since: number,
+  until: number
+): SubagentRollup | undefined {
+  const ids = new Set(childIDs)
+  const rows = history.filter(
+    (t) => t.sessionID !== undefined && ids.has(t.sessionID) && t.at >= since && t.at <= until
+  )
+  if (rows.length === 0) return undefined
+  let start = Infinity
+  let end = -Infinity
+  let cost = 0
+  let sawCost = false
+  for (const t of rows) {
+    end = Math.max(end, t.at)
+    start = Math.min(start, t.at - (t.totalS ?? 0) * 1000)
+    if (typeof t.cost === "number" && t.cost > 0) {
+      cost += t.cost
+      sawCost = true
+    }
+  }
+  return {
+    count: new Set(rows.map((t) => t.sessionID)).size,
+    tokens: rows.reduce((n, t) => n + t.tokens, 0),
+    spanS: (end - start) / 1000,
+    cost: sawCost ? cost : undefined,
+  }
+}
+
+/** The per-turn block's sub-agent line: sums only, never a rate. */
+export function formatSubagentLine(r: SubagentRollup): string {
+  const cost = money(r.cost)
+  return `+${ni(r.count)} sub-agent${r.count === 1 ? "" : "s"}  ${ni(r.tokens)} tok  ${nn(r.spanS, 2)}s${cost ? `  ${cost}` : ""}`
 }
 
 /** A turn's streaming time: recorded, or derived from an older row's rate. */
@@ -122,6 +170,20 @@ export function summariseSession(
     draftAccept: eng((e) => e.draftAccept),
   }
 
+  let subCount = 0
+  let subTokens = 0
+  let subCost = 0
+  let subSawCost = false
+  for (const t of turns) {
+    if (!t.subagents) continue
+    subCount += t.subagents.count
+    subTokens += t.subagents.tokens
+    if (t.subagents.cost !== undefined) {
+      subCost += t.subagents.cost
+      subSawCost = true
+    }
+  }
+
   return {
     turns: turns.length,
     totalTurns: all.length,
@@ -138,6 +200,7 @@ export function summariseSession(
       engine.prefillTokS !== undefined || engine.mtpX !== undefined || engine.draftAccept !== undefined
         ? engine
         : undefined,
+    subagents: subCount > 0 ? { count: subCount, tokens: subTokens, cost: subSawCost ? subCost : undefined } : undefined,
   }
 }
 
@@ -197,6 +260,10 @@ export function sessionRows(s: SessionSummary): Array<[string, string]> {
       s.engine.prefillTokS !== undefined ? `prefill ${ni(s.engine.prefillTokS)} tok/s` : "",
     ].filter(Boolean)
     if (e.length > 0) rows.push(["engine", e.join(" · ")])
+  }
+  if (s.subagents) {
+    const cost = money(s.subagents.cost)
+    rows.push(["sub-agents", `${ni(s.subagents.count)} · ${ni(s.subagents.tokens)} tok${cost ? ` · ${cost}` : ""}`])
   }
   if (s.retries > 0) rows.push(["retries", ni(s.retries)])
   return rows

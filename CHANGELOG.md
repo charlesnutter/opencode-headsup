@@ -10,6 +10,11 @@
   and retries. Only the current model's turns count; the heading says so
   when the model changed partway through. The session's tokens, context
   and cost are left to OpenCode's own sidebar.
+- Sub-agent roll-ups. A turn that started sub-agents adds a line to the
+  per-turn figures, `+2 sub-agents  4210 tok  38.10s  $0.012`: their tokens
+  and cost summed, and the time from the first starting to the last
+  finishing. Rates are never combined across them. The Session section
+  totals them in a `sub-agents` row.
 - `sessionBackground` option: the theme's offset shade behind the Session
   section.
 

@@ -32,7 +32,7 @@ import type { HttpOptions } from "./http"
 import { universalLine, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
 import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
-import { summariseSession, sessionHeading, sessionRows } from "./session"
+import { summariseSession, sessionHeading, sessionRows, rollupSubagents, formatSubagentLine } from "./session"
 
 import { fetchMtplxLatest, formatMtplxLine, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, formatOmlxLine, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -662,6 +662,27 @@ export default Plugin.define({
         else if (tier2.sharedWindow) line += "\nengine data skipped: overlapping requests"
       }
 
+      // Sub-agents that ran during this turn, each in its own child session
+      // whose turns are recorded under that session (measured: the child's
+      // row existed, and the child had finished, 11s before the parent's turn
+      // ended). Their tokens, time and cost are summed onto one line; rates
+      // are never combined, since a sub-agent can run on another model.
+      let subagents: TurnRecord["subagents"]
+      try {
+        const descendants = ctx.data.session.family(sessionID).filter((id) => {
+          let p = ctx.data.session.get(id)?.parentID
+          for (let hops = 0; p && hops < 16; hops++) {
+            if (p === sessionID) return true
+            p = ctx.data.session.get(p)?.parentID
+          }
+          return false
+        })
+        subagents = rollupSubagents(history.turns, descendants, info.time.created, Date.now())
+      } catch (e: unknown) {
+        dbg(`sub-agent lookup threw: ${String(e)}`)
+      }
+      if (subagents) line += `\n${formatSubagentLine(subagents)}`
+
       // Keep the turn for the drill-down. Every figure below is OpenCode's own,
       // whatever tier drew the sidebar line; `source` records only which tier
       // that was, so a row that differs from the live line can be explained.
@@ -690,6 +711,7 @@ export default Plugin.define({
         retries: turn?.retries,
         steps: turn?.steps,
         engine: enriched ? tier2.engine : undefined,
+        subagents,
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns
@@ -803,6 +825,22 @@ export default Plugin.define({
         off.push(
           ctx.data.on("session.execution.started", (evt) => {
             dbg(`event execution.started ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.step.streamed", (evt) => {
+            // Whether an engine that keeps only its latest request has already
+            // recorded the step when streaming ends -- step.ended comes only
+            // after the step's tools have run (measured: 29ms after a sub-agent
+            // on the same engine finished), by which time `latest` can be the
+            // tool's request, not the step's.
+            const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID ?? "?"
+            dbg(`event step.streamed ${id}`)
+            if (stepProvider.get(id) === "mtplx") {
+              fetchMtplxLatest(cfg.mtplxUrl, { signal: life.signal })
+                .then((l) => dbg(`  probe mtplx latest at step.streamed: ${l?.completion_tokens ?? "none"} tok`))
+                .catch(() => {})
+            }
           })
         )
         off.push(
