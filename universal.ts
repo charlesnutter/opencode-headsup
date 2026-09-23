@@ -127,7 +127,7 @@ export function turnSteps(
  *   from the first step's creation, which matched OpenCode's footer on a
  *   turn with no retries (37.13s against 37.2s) but covered only 14.87s of
  *   a 60s turn that retried one step six times;
- * - ttft is the first step's; the decode window is the sum of each step's
+ * - ttft is the first step's, from its request; the decode window is the sum of each step's
  *   own stream window, so tool execution between steps is not counted as
  *   decoding. If any step has no marks, there is no decode window at all
  *   (`streamMs` 0) and the rate falls back to whole-turn, labelled overall.
@@ -179,7 +179,13 @@ export function aggregateTurn(
   const firstMarks = marks.get(first.id)
   const lastMarks = marks.get(last.id)
   const turn: Turn = {
-    startAt: firstMarks?.startAt ?? first.time.created,
+    // The request's start is the first step's creation. Not
+    // session.step.started: that fires when the engine BEGINS responding,
+    // which on an engine that holds its response until the first token is
+    // after prefill (measured on MTPLX: 18.0s after the request, against an
+    // engine TTFT of 17.63s). On a retried turn this ttft includes the
+    // retries, which the total names.
+    startAt: first.time.created,
     firstAt: firstMarks?.firstAt,
     lastAt: lastMarks?.lastAt,
     streamMs: timed ? streamMs : 0,

@@ -303,11 +303,18 @@ test("the total runs from the execution start when one is known", () => {
   assert.ok(Math.abs(turnRate(316, info, turn).total - 60.13) < 0.001)
 })
 
-test("ttft is from the successful attempt's start, not the execution start", () => {
-  // The 23s before the step (retries, snapshotting, a queued title request)
-  // is in the total, never in the ttft.
-  const { info, turn } = aggregateTurn(turnSteps(toolTurn), marks, { execStart: T0 - 23_000 })
-  assert.ok(Math.abs(turnRate(316, info, turn).ttft - 7.4) < 0.001)
+test("ttft runs from the request, not from when the engine began responding", () => {
+  // Measured on MTPLX: execution.started 17:22:56.8, step.started 17:23:14.8,
+  // engine TTFT 17.63s at 447 tok/s prefill over 7,816 prompt tokens. So
+  // step.started fires when the response BEGINS -- after prefill on an engine
+  // that holds its response until the first token. Measuring ttft from it
+  // would drop the prefill that ttft exists to show.
+  const info = { time: { created: T0, completed: T0 + 28_120 }, tokens: { output: 97, reasoning: 272 } }
+  const steps = [{ type: "user" }, { type: "assistant", id: "m1", ...info }]
+  const lateStart = new Map([["m1", { startAt: T0 + 18_000, firstAt: T0 + 17_700, lastAt: T0 + 28_100, attempts: 1 }]])
+  const { info: agg, turn } = aggregateTurn(turnSteps(steps), lateStart, { execStart: T0 })
+  const r = turnRate(369, agg, turn)
+  assert.ok(Math.abs(r.ttft - 17.7) < 0.001, `ttft should include prefill, got ${r.ttft}`)
 })
 
 test("retries are counted per step and shown beside the total", () => {

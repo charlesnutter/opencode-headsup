@@ -10,8 +10,6 @@
   after each step's first token, so tool execution and prefill never count.
   A turn that cannot be timed from its stream shows no rate, where it used to
   show a whole-turn figure labelled `overall`.
-- TTFT is measured from the start of the attempt that succeeded, not from
-  the start of the turn.
 
 ### Fixed
 - Prometheus engines declined every tool-using turn: its window holds one

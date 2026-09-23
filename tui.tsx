@@ -572,12 +572,13 @@ export default Plugin.define({
       // Each attempt at a step. OpenCode retries a step under the same message
       // id (measured: seven starts for one message on a busy vllm-mlx), and
       // only the final attempt's stream is the step's, so the marks restart.
+      // Not a request start: this fires when the engine begins responding,
+      // after prefill on MTPLX, so ttft is measured from the message instead.
       off.push(
         ctx.data.on("session.step.started", (evt) => {
           const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
           if (typeof id !== "string") return
           const t = turnFor(id)
-          t.startAt = Date.now()
           t.firstAt = undefined
           t.lastAt = undefined
           t.attempts = (t.attempts ?? 0) + 1
