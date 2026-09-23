@@ -19,6 +19,13 @@
   section.
 
 ### Changed
+- `mtplx`, `koboldcpp` and `mlxserve` are read when each step finishes
+  streaming, not when OpenCode marks the step ended. For a step that calls
+  tools, "ended" comes only after the tools have run, and a sub-agent on the
+  same engine had replaced the step's figures by then, so the turn was
+  declined with `engine data skipped: overlapping requests`. Measured on
+  MTPLX: 194 tokens (the step's own) at the end of streaming, 163 (the
+  sub-agent's) at "ended".
 - The per-turn block's first line (engine and model) is bold, matching
   OpenCode's own sidebar sections.
 

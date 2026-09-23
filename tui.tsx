@@ -771,6 +771,10 @@ export default Plugin.define({
             stepModel.set(id, d.model.id)
             bound(stepModel)
           }
+          // A new attempt at the step: any read from an earlier attempt is not
+          // this attempt's, and would block the new read (readStep keeps the
+          // first read per step).
+          stepReads.delete(id)
           const t = turnFor(id)
           t.firstAt = undefined
           t.lastAt = undefined
@@ -783,32 +787,55 @@ export default Plugin.define({
           if (typeof sid === "string") execStart.set(sid, Date.now())
         })
       )
+      // Read engines that keep only their latest request when a step's
+      // streaming ends. Not at step.ended: for a step that calls tools, that
+      // fires only after the tools have run, so a tool using the same engine
+      // -- a sub-agent, measured -- has replaced `latest` by then (step.ended
+      // read 163 tok, the sub-agent's; step.streamed read 194, the step's
+      // own). At step.streamed the engine already held the step on all five
+      // steps measured. step.ended stays as a fallback for a step whose
+      // stream event never arrived.
+      const readStep = (id: string, moment: string): void => {
+        if (stepReads.has(id)) return
+        const provider = stepProvider.get(id)
+        const http: HttpOptions = { signal: life.signal }
+        let read: Promise<unknown> | undefined
+        if (provider === "mtplx") {
+          const r = fetchMtplxLatest(cfg.mtplxUrl, http).catch(() => null)
+          r.then((l) => dbg(`  mtplx receipt at ${moment}: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
+          read = r
+        } else if (provider === "koboldcpp" || provider === "kobold") {
+          const r = fetchKoboldPerf(cfg.koboldBase, http).catch(() => null)
+          r.then((p) => dbg(`  koboldcpp receipt at ${moment}: ${p?.last_token_count ?? "none"} tok`)).catch(() => {})
+          read = r
+        } else if (provider === "mlxserve" || provider === "mlx-serve") {
+          const r = fetchMlxServeRequests(cfg.mlxServeBase, stepModel.get(id), cfg.mlxServeKey || undefined, http).catch(
+            () => null
+          )
+          r.then((recs) => dbg(`  mlxserve receipt at ${moment}: ${recs?.[0]?.completionTokens ?? "none"} tok`)).catch(
+            () => {}
+          )
+          read = r
+        }
+        if (read) {
+          stepReads.set(id, read)
+          bound(stepReads)
+        }
+      }
+      const stepID = (evt: unknown): string | undefined => {
+        const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
+        return typeof id === "string" ? id : undefined
+      }
+      off.push(
+        ctx.data.on("session.step.streamed", (evt) => {
+          const id = stepID(evt)
+          if (id) readStep(id, "step.streamed")
+        })
+      )
       off.push(
         ctx.data.on("session.step.ended", (evt) => {
-          const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
-          if (typeof id !== "string") return
-          const provider = stepProvider.get(id)
-          const http: HttpOptions = { signal: life.signal }
-          let read: Promise<unknown> | undefined
-          if (provider === "mtplx") {
-            const r = fetchMtplxLatest(cfg.mtplxUrl, http).catch(() => null)
-            r.then((l) => dbg(`  mtplx receipt at step.ended: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
-            read = r
-          } else if (provider === "koboldcpp" || provider === "kobold") {
-            const r = fetchKoboldPerf(cfg.koboldBase, http).catch(() => null)
-            r.then((p) => dbg(`  koboldcpp receipt at step.ended: ${p?.last_token_count ?? "none"} tok`)).catch(() => {})
-            read = r
-          } else if (provider === "mlxserve" || provider === "mlx-serve") {
-            const r = fetchMlxServeRequests(cfg.mlxServeBase, stepModel.get(id), cfg.mlxServeKey || undefined, http).catch(
-              () => null
-            )
-            r.then((recs) => dbg(`  mlxserve receipt at step.ended: ${recs?.[0]?.completionTokens ?? "none"} tok`)).catch(() => {})
-            read = r
-          }
-          if (read) {
-            stepReads.set(id, read)
-            bound(stepReads)
-          }
+          const id = stepID(evt)
+          if (id) readStep(id, "step.ended (fallback)")
         })
       )
       off.push(ctx.data.on("session.text.delta", mark))
@@ -829,18 +856,7 @@ export default Plugin.define({
         )
         off.push(
           ctx.data.on("session.step.streamed", (evt) => {
-            // Whether an engine that keeps only its latest request has already
-            // recorded the step when streaming ends -- step.ended comes only
-            // after the step's tools have run (measured: 29ms after a sub-agent
-            // on the same engine finished), by which time `latest` can be the
-            // tool's request, not the step's.
-            const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID ?? "?"
-            dbg(`event step.streamed ${id}`)
-            if (stepProvider.get(id) === "mtplx") {
-              fetchMtplxLatest(cfg.mtplxUrl, { signal: life.signal })
-                .then((l) => dbg(`  probe mtplx latest at step.streamed: ${l?.completion_tokens ?? "none"} tok`))
-                .catch(() => {})
-            }
+            dbg(`event step.streamed ${(evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID ?? "?"}`)
           })
         )
         off.push(
