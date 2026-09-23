@@ -109,11 +109,27 @@ export function diffLlamaCppCounters(
  * prefill, where an engine stamps from the request reaching it. Same word,
  * different span, so it says which.
  */
+/**
+ * Whether a window is this turn's. llama.cpp has no request counter, so the
+ * token count is the whole check: the window's generated tokens must equal
+ * OpenCode's own count for the turn, summed over its steps. A title request,
+ * another client, or an interrupted turn still generating all add tokens.
+ * 0 or absent means OpenCode has no count, and the check is skipped.
+ */
+export function llamaCppIsThisTurn(t: LlamaCppTurn, hostTokens: number | undefined): boolean {
+  return hostTokens === undefined || hostTokens <= 0 || t.completionTokens === hostTokens
+}
+
+/**
+ * `host.total` is the turn's total from OpenCode -- what the user waited,
+ * retries included -- and wins over the engine's own timings.
+ */
 export function formatLlamaCppLine(
   t: LlamaCppTurn,
   label: string,
   model: string,
-  hostTtft?: number
+  hostTtft?: number,
+  host: { total?: number; retries?: number } = {}
 ): string {
   // Host-derived, and labelled as such. No derived figure on this line takes
   // its numerator from one source and its denominator from the other -- ttft
@@ -123,7 +139,9 @@ export function formatLlamaCppLine(
     `${label}  ${short(model)}`,
     t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
     t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
-    `${ni(t.completionTokens)} tok  ${nn(t.decodeS + t.prefillS, 2)}s`,
+    `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.decodeS + t.prefillS, 2)}s${
+      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
+    }`,
   ]
     .filter(Boolean)
     .join("\n")

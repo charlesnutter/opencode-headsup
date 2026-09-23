@@ -34,11 +34,12 @@ import { record, formatHistory, formatCollapsedLine, latestFor, type History, ty
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
 
 import { fetchMtplxLatest, formatMtplxLine, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
-import { fetchOmlxSample, formatOmlxLine, type OmlxSample } from "./adapters/omlx"
+import { fetchOmlxSample, formatOmlxLine, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
 import {
   fetchLlamaCppCounters,
   diffLlamaCppCounters,
   formatLlamaCppLine,
+  llamaCppIsThisTurn,
   type LlamaCppCounters,
 } from "./adapters/llamacpp"
 import { fetchMlxServeRequests, mlxServeTurn, formatMlxServeLine, combineMlxServeSteps, type MlxServeRequest } from "./adapters/mlxserve"
@@ -46,6 +47,7 @@ import {
   fetchSplashSample,
   diffSplashSamples,
   formatSplashLine,
+  splashIsThisTurn,
   type SplashSample,
 } from "./adapters/splash"
 import { fetchKoboldPerf, koboldTurn, formatKoboldLine, combineKoboldSteps, type KoboldPerf } from "./adapters/koboldcpp"
@@ -376,8 +378,20 @@ export default Plugin.define({
           setBase((d) => {
             d.omlx = now
           })
-          if (prev) match(now.completion - prev.completion, `; requests ${now.requests - prev.requests}`)
-          return formatOmlxLine(now, prev, hostTtft)
+          if (prev) {
+            match(now.completion - prev.completion, `; requests ${now.requests - prev.requests}, steps ${steps.length}`)
+            // A window that isn't this turn's -- a spare request, or tokens
+            // that don't match -- is declined. The no-baseline render below
+            // is labelled as the server's averages and needs no check.
+            if (now.requests > prev.requests && !omlxIsThisTurn(prev, now, { tokens: hostTokens, steps: steps.length })) {
+              tier2.sharedWindow = true
+              return null
+            }
+          }
+          return formatOmlxLine(now, prev, hostTtft, {
+            ...hostFigures,
+            decodeTokS: turnRate(hostTokens, info, turn).decodeTokS,
+          })
         }
 
         // llamafile is llama.cpp-derived and publishes identical metric names,
@@ -398,8 +412,13 @@ export default Plugin.define({
             return null
           }
           const t = diffLlamaCppCounters(prev, now)
-          if (t) match(t.completionTokens)
-          return t ? formatLlamaCppLine(t, label, model, hostTtft) : null
+          if (!t) return null
+          match(t.completionTokens, `; steps ${steps.length}`)
+          if (!llamaCppIsThisTurn(t, hostTokens)) {
+            tier2.sharedWindow = true
+            return null
+          }
+          return formatLlamaCppLine(t, label, model, hostTtft, hostFigures)
         }
 
         case "splash": {
@@ -414,8 +433,13 @@ export default Plugin.define({
             return null
           }
           const t = diffSplashSamples(prev, now)
-          if (t) match(t.completionTokens, `; requests ${t.requests}`)
-          return t ? formatSplashLine(t, model, hostTtft) : null
+          if (!t) return null
+          match(t.completionTokens, `; requests ${t.requests}, steps ${steps.length}`)
+          if (!splashIsThisTurn(t, { tokens: hostTokens, steps: steps.length })) {
+            tier2.sharedWindow = true
+            return null
+          }
+          return formatSplashLine(t, model, hostTtft, { ...hostFigures, steps: steps.length })
         }
 
         case "koboldcpp":

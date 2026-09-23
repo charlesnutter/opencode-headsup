@@ -89,10 +89,32 @@ export function recoverLatest(
  * prefill, where an engine stamps from the request reaching it. Same word,
  * different span, so it says which.
  */
+/**
+ * Whether a window is this turn's: as many requests as the turn had steps,
+ * and the window's completion tokens equal to OpenCode's own count for the
+ * turn. A host token count of 0 or absent skips the token check.
+ */
+export function omlxIsThisTurn(
+  prev: OmlxSample,
+  now: OmlxSample,
+  host: { tokens?: number; steps?: number }
+): boolean {
+  if (prev.model !== now.model) return false
+  if (now.requests - prev.requests !== (host.steps ?? 1)) return false
+  return host.tokens === undefined || host.tokens <= 0 || now.completion - prev.completion === host.tokens
+}
+
+/**
+ * `host.decodeTokS` is OpenCode's generation rate for the turn, used when
+ * the running mean cannot recover this turn's own: over several requests it
+ * yields only the server's all-time average, which is not this turn's speed.
+ * `host.total` is the turn's total from OpenCode, retries included.
+ */
 export function formatOmlxLine(
   now: OmlxSample,
   prev: OmlxSample | undefined,
-  hostTtft?: number
+  hostTtft?: number,
+  host: { decodeTokS?: number; total?: number; retries?: number } = {}
 ): string {
   const header = `oMLX  ${short(now.model ?? "")}`
   // Host-derived, and labelled as such. No derived figure on this line takes
@@ -123,9 +145,10 @@ export function formatOmlxLine(
   // from the window.
   const recoveredDecode = recoverLatest(prev.avgGen, prev.requests, now.avgGen, now.requests)
   const recoveredPrefill = recoverLatest(prev.avgPrefill, prev.requests, now.avgPrefill, now.requests)
-  const decodeLabel = recoveredDecode === undefined ? " (avg)" : ""
+  const useHostRate = recoveredDecode === undefined && host.decodeTokS !== undefined
+  const decodeLabel = recoveredDecode === undefined && !useHostRate ? " (avg)" : ""
   const prefillLabel = recoveredPrefill === undefined ? " (avg)" : ""
-  const decode = recoveredDecode ?? now.avgGen
+  const decode = recoveredDecode ?? (useHostRate ? (host.decodeTokS as number) : now.avgGen)
   const prefill = recoveredPrefill ?? now.avgPrefill
 
   const completion = now.completion - prev.completion
@@ -136,7 +159,11 @@ export function formatOmlxLine(
     header,
     `${nn(decode)} tok/s${decodeLabel}${ttftLabel}`,
     `prefill ${ni(prefill)} tok/s${prefillLabel}`,
-    `${ni(completion)} tok  (${ni(promptTokens)} prompt${cached > 0 ? `, ${ni(cached)} cached` : ""})`,
+    `${ni(completion)} tok  (${ni(promptTokens)} prompt${cached > 0 ? `, ${ni(cached)} cached` : ""})${
+      host.total !== undefined ? `  ${nn(host.total, 2)}s` : ""
+    }${
+      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
+    }`,
   ].join("\n")
 }
 

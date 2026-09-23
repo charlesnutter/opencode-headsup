@@ -27,7 +27,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { recoverLatest, formatOmlxLine, toOmlxSample } from "../adapters/omlx.ts"
+import { recoverLatest, formatOmlxLine, toOmlxSample, omlxIsThisTurn } from "../adapters/omlx.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const fixture = (name) => JSON.parse(readFileSync(path.join(dir, "..", "fixtures", name), "utf8"))
@@ -152,6 +152,29 @@ test("the loaded model wins over the configured default", () => {
 
   assert.equal(toOmlxSample({ loaded_models: ["a"], default_model: "b" }).model, "a")
   assert.equal(toOmlxSample({ default_model: "b" }).model, "b")
+})
+
+// ---- is the window this turn's? ---------------------------------------------
+// oMLX counts requests and tokens, so a window is this turn's when its
+// requests equal the turn's steps and its tokens equal the turn's.
+test("a one-request window with matching tokens is this turn's", () => {
+  assert.equal(omlxIsThisTurn(before, afterOne, { tokens: 100, steps: 1 }), true)
+  assert.equal(omlxIsThisTurn(before, afterOne, { tokens: 80, steps: 1 }), false)
+  assert.equal(omlxIsThisTurn(before, afterOne, { tokens: 100, steps: 2 }), false)
+})
+
+test("a two-step turn with two requests and matching tokens is this turn's", () => {
+  // after-one -> after-two: two requests, 120 tokens, captured live.
+  assert.equal(omlxIsThisTurn(afterOne, afterTwo, { tokens: 120, steps: 2 }), true)
+})
+
+test("a multi-step turn uses OpenCode's generation rate, not the server's all-time average", () => {
+  // The running mean can only recover one request's rate; over two it is
+  // the server's lifetime average, which is not this turn's speed.
+  const out = formatOmlxLine(afterTwo, afterOne, 0.5, { decodeTokS: 42.5, total: 12.0 })
+  assert.ok(out.includes("42.5 tok/s"), out)
+  assert.ok(!out.includes("(avg)  ttft") && !/tok\/s \(avg\)/.test(out.split("\n")[1]), out)
+  assert.ok(out.includes("12.00s"), out)
 })
 
 console.log(`\n${passed} passed`)

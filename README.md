@@ -416,9 +416,13 @@ its token count equals OpenCode's for the turn. OpenCode's own background
 work (a new session's title, compaction), a turn you interrupted that kept
 generating, or another tab or client sharing the server all break that, and
 no engine here labels its counters by request or session to separate them
-again. So for the Prometheus engines, a turn that shared its window shows
-the universal line with `engine data skipped: overlapping requests` rather
-than figures that describe several requests at once.
+again. So a turn that shared its window shows the universal line with
+`engine data skipped: overlapping requests` rather than figures that
+describe several requests at once. This applies to every engine that
+differences counters: the Prometheus engines, `llamacpp`, `llamafile`,
+`splash` and `omlx`, checked against the turn's tokens and, where the
+engine counts requests, against its steps. Verified live on vllm-mlx; the
+others are built from their live captures.
 
 `mtplx`, `koboldcpp` and `mlxserve` report only the engine's latest
 request, so they are read at the end of every step and the steps' receipts

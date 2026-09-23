@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { parseSplashSample, diffSplashSamples, formatSplashLine } from "../adapters/splash.ts"
+import { parseSplashSample, diffSplashSamples, formatSplashLine, splashIsThisTurn } from "../adapters/splash.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const fixture = (name) => readFileSync(path.join(dir, "..", "fixtures", name), "utf8")
@@ -254,6 +254,39 @@ test("Splash: no host ttft means no ttft line, not an empty one", () => {
   assert.ok(!out.includes("?"), out)
   // and the rest of the line is unchanged by the new parameter
   assert.deepEqual(out.split("\n").length, formatSplashLine(t, "m").split("\n").length)
+})
+
+// ---- is the window this turn's? ---------------------------------------------
+// Splash counts requests, so a window is this turn's when its requests equal
+// the turn's steps (one request per step) and its tokens equal the turn's.
+// `splash opencode` routes OpenCode's title and compaction requests to
+// Splash, so a spare request in the window is the expected failure.
+test("Splash: one request and matching tokens is this turn's", () => {
+  const [b, a] = pair("splash")
+  const t = diffSplashSamples(b, a)
+  assert.equal(splashIsThisTurn(t, { tokens: USAGE.completion_tokens, steps: 1 }), true)
+})
+
+test("Splash: tokens that don't match the turn's are declined", () => {
+  const [b, a] = pair("splash")
+  assert.equal(splashIsThisTurn(diffSplashSamples(b, a), { tokens: 150, steps: 1 }), false)
+})
+
+test("Splash: more requests than steps means another request landed", () => {
+  const [b, a] = pair("splash")
+  const t = { ...diffSplashSamples(b, a), requests: 2 }
+  assert.equal(splashIsThisTurn(t, { tokens: USAGE.completion_tokens, steps: 1 }), false)
+  assert.equal(splashIsThisTurn(t, { tokens: USAGE.completion_tokens, steps: 2 }), true)
+})
+
+test("Splash: a verified multi-step turn needs no 'requests this turn' note", () => {
+  const [b, a] = pair("splash")
+  const t = { ...diffSplashSamples(b, a), requests: 2 }
+  const verified = formatSplashLine(t, "m", 0.4, { total: 9.0, steps: 2 })
+  assert.ok(!verified.includes("requests this turn"), verified)
+  assert.ok(verified.includes("200 tok  9.00s"), verified)
+  // Unverified (no step count), the note still says the figures are sums.
+  assert.ok(formatSplashLine(t, "m").includes("2 requests this turn"))
 })
 
 console.log(`\n${passed} passed`)

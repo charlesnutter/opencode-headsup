@@ -13,6 +13,7 @@ import {
   parseLlamaCppCounters,
   diffLlamaCppCounters,
   formatLlamaCppLine,
+  llamaCppIsThisTurn,
 } from "../adapters/llamacpp.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
@@ -140,6 +141,32 @@ test("missing rates are omitted, never rendered as placeholders", () => {
   const out = formatLlamaCppLine(t, "llama.cpp", "m")
   assert.ok(!out.includes("?"), out)
   assert.equal(out.split("\n").length, 2)
+})
+
+// ---- is the window this turn's? ---------------------------------------------
+// llama.cpp has no request counter, so the token count is the whole check:
+// the window's generated tokens must equal OpenCode's count for the turn,
+// summed over its steps. Anything else -- a title request, another client,
+// an interrupted turn still generating -- declines the engine line.
+test("a window whose tokens equal the turn's is this turn's", () => {
+  const t = diffLlamaCppCounters(before, after)
+  assert.equal(llamaCppIsThisTurn(t, USAGE.completion_tokens), true)
+})
+
+test("a window holding more tokens than the turn made is declined", () => {
+  const t = diffLlamaCppCounters(before, after)
+  assert.equal(llamaCppIsThisTurn(t, 20), false)
+})
+
+test("with no host count to compare, the check does not apply", () => {
+  const t = diffLlamaCppCounters(before, after)
+  assert.equal(llamaCppIsThisTurn(t, 0), true)
+})
+
+test("the total is OpenCode's -- what you waited -- with retries named", () => {
+  const t = diffLlamaCppCounters(before, after)
+  const out = formatLlamaCppLine(t, "llama.cpp", "m", 0.3, { total: 7.0, retries: 1 })
+  assert.ok(out.includes("32 tok  7.00s (1 retry)"), out)
 })
 
 console.log(`\n${passed} passed`)

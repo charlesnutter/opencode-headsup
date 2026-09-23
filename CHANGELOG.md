@@ -11,9 +11,16 @@
   count. KoboldCpp's `N generations this turn (last shown only)` no longer
   appears on turns read step by step, since nothing is dropped. Built from
   live captures; not yet run step by step against a live server.
-- The `mtplx`, `koboldcpp` and `mlxserve` totals are OpenCode's -- what you
-  waited, retries named -- rather than the engine's duration for its latest
-  request.
+- `llamacpp`, `llamafile`, `splash` and `omlx` check that a window is this
+  turn's before showing it: its tokens must equal OpenCode's count for the
+  turn and, for Splash and oMLX, its requests must equal the turn's steps.
+  A window that fails shows the universal line with the overlapping-requests
+  notice. Splash's `N requests this turn` no longer appears once the
+  requests are accounted for. On a multi-step turn oMLX shows OpenCode's
+  generation rate instead of the server's all-time average. Built from live
+  captures; not yet run against a live server.
+- Every engine line's total is OpenCode's -- what you waited, retries named
+  -- rather than an engine's own request or phase timings.
 
 ## [0.2.3] – 2026-09-23
 ### Changed
