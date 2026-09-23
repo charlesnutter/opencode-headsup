@@ -6,6 +6,9 @@
   second tab. Measured: a 46-token answer showed `116135.1 tok/s` over
   `8594 tok`. Such a turn now shows the universal line with
   `engine data skipped: overlapping requests`.
+- The history panel's legend said `*` rows were "engine-measured". Every row
+  holds OpenCode's own figures; `*` only means the sidebar line for that turn
+  came from the engine. The legend now says so.
 
 ## [0.2.1] – 2026-09-22
 ### Fixed

@@ -493,9 +493,9 @@ export default Plugin.define({
         else if (tier2.sharedWindow) line += "\nengine data skipped: overlapping requests"
       }
 
-      // Keep the turn for the drill-down. `source` is the epistemics: an
-      // engine-measured rate and one derived from OpenCode's stream marks are
-      // different claims, and the panel must not flatten them.
+      // Keep the turn for the drill-down. Every figure below is OpenCode's own,
+      // whatever tier drew the sidebar line; `source` records only which tier
+      // that was, so a row that differs from the live line can be explained.
       const out = info.tokens?.output ?? 0
       const reasoning = info.tokens?.reasoning ?? 0
       const r = turnRate(out + reasoning, info, turn)
@@ -513,11 +513,7 @@ export default Plugin.define({
         cost: typeof info.cost === "number" && info.cost > 0 ? info.cost : undefined,
         cached: info.tokens?.cache?.read,
         source: enriched ? "engine" : "host",
-        // `source` describes the line's figures; `ttft` is the exception and
-        // always host-derived, because `turnRate` is what produced it here
-        // regardless of tier. Recording that per-figure keeps an enriched row
-        // from claiming an engine provenance it does not have for this one
-        // number.
+        // Host-derived like every figure in this row; see TurnRecord.ttftSource.
         ttftSource: "host",
       }
       setHistory((d) => {

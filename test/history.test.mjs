@@ -105,16 +105,27 @@ test("a whole-turn rate is labelled in the row, not passed off as decode", () =>
   assert.ok(!formatRow(turn({ rate: 38.1, rateWindow: "decode" })).includes("overall"))
 })
 
-test("an engine-measured row is marked; a host-derived one is not", () => {
+test("a row whose sidebar line came from the engine is marked; others are not", () => {
   assert.ok(formatRow(turn({ source: "engine" })).startsWith("*"))
   assert.ok(!formatRow(turn({ source: "host" })).startsWith("*"))
 })
 
+const LEGEND = "* sidebar used engine telemetry; rows are OpenCode's figures"
+
 test("the legend appears only when both kinds are actually present", () => {
   const mixed = formatHistory([turn({ source: "engine" }), turn({ source: "host" })])
-  assert.ok(mixed.includes("engine-measured"), "mixed window needs the legend")
+  assert.ok(mixed.includes(LEGEND), `mixed window needs the legend:\n${mixed}`)
   const allEngine = formatHistory([turn({ source: "engine" }), turn({ source: "engine" })])
-  assert.ok(!allEngine.includes("engine-measured"), "a legend for an absent distinction is noise")
+  assert.ok(!allEngine.includes(LEGEND), "a legend for an absent distinction is noise")
+})
+
+// Every row is built from OpenCode's own figures (`info.tokens`,
+// `turnRate(info)`) whatever tier drew the sidebar line; no engine figure is
+// ever recorded. The old legend -- "engine-measured; the rest from OpenCode's
+// own turn data" -- therefore claimed a provenance no row has ever had.
+test("the legend never claims a row's figures are engine-measured", () => {
+  const mixed = formatHistory([turn({ source: "engine" }), turn({ source: "host" })])
+  assert.ok(!mixed.includes("engine-measured"), mixed)
 })
 
 test("an empty history says so rather than rendering an empty frame", () => {

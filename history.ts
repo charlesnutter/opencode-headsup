@@ -12,10 +12,11 @@
 import { nn, ni, money, short } from "./format"
 
 /**
- * Where a turn's figures came from. Kept per row because the panel must not
- * flatten the distinction: an engine-measured decode rate and a rate derived
- * from OpenCode's own stream marks are different claims, and a session where
- * half the rows are one and half the other should say so.
+ * Which tier drew the sidebar line for this turn. NOT the provenance of the
+ * row's own figures: every row is built from OpenCode's figures (`info.tokens`
+ * and `turnRate`) whatever tier rendered the line, and no engine figure is
+ * ever recorded. The marker says where the panel's live line came from, which
+ * explains why a row can differ from what the sidebar showed.
  */
 export type Source = "engine" | "host"
 
@@ -42,11 +43,9 @@ export interface TurnRecord {
   sessionID?: string
   ttft?: number
   /**
-   * Which tier `ttft` came from. Separate from `source` because it is the one
-   * figure that does not follow the line's tier: the host's stream marks are
-   * the only ttft available for several engines, so an engine-sourced row can
-   * still carry a host-derived ttft. One flag for the whole row would misreport
-   * it.
+   * Which tier `ttft` came from. Always "host" today, like every figure in
+   * the row; kept so a future row that records an engine figure can say so
+   * per figure rather than per row.
    */
   ttftSource?: Source
   /** Whole-turn duration in seconds. */
@@ -171,10 +170,11 @@ export function formatCollapsedLine(
 /**
  * The whole panel body: a summary, then the rows.
  *
- * `*` marks a row whose figures came from the serving engine's own metrics
- * rather than from OpenCode's turn events. The legend is only printed when
- * the distinction actually appears in the window, because a legend for
- * something absent is noise.
+ * `*` marks a row whose sidebar line came from the serving engine's own
+ * metrics. The row itself is OpenCode's figures either way, which the legend
+ * says, because an earlier wording claimed the row was engine-measured.
+ * The legend is only printed when the distinction actually appears in the
+ * window, because a legend for something absent is noise.
  */
 export function formatHistory(turns: readonly TurnRecord[], modelWidth = 18): string {
   if (turns.length === 0) {
@@ -192,6 +192,6 @@ export function formatHistory(turns: readonly TurnRecord[], modelWidth = 18): st
 
   const rows = turns.map((t) => formatRow(t, modelWidth))
   const mixed = s.engineRows > 0 && s.engineRows < turns.length
-  const legend = mixed ? ["", "* engine-measured; the rest from OpenCode's own turn data"] : []
+  const legend = mixed ? ["", "* sidebar used engine telemetry; rows are OpenCode's figures"] : []
   return [head, "", ...rows, ...legend].join("\n")
 }
