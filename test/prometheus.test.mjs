@@ -419,6 +419,47 @@ test("Prometheus: with no host count to compare, the token check does not apply"
   assert.ok(formatPromLine(diff, "vLLM", "m", NO_FALLBACK) !== null)
 })
 
+// A tool-using turn is one request per step, so its window holds one TTFT
+// per step. Measured (vllm-mlx, 2026-09-23): a 3-step turn read `ttft 4` --
+// three steps plus a title request. The rule is one TTFT per step AND the
+// engine's tokens equal to the turn's summed host count.
+
+test("Prometheus: a clean two-step tool turn keeps its engine tokens", () => {
+  const before = parsePromSample(fixture("vllm-mlx-idle.prom"), VLLM_MLX_SPEC)
+  const now = {
+    ...before,
+    generation: before.generation + 84,
+    prompt: before.prompt + 21423,
+    ttftCount: before.ttftCount + 2,
+    ttftSum: before.ttftSum + 9.0,
+    durationCount: before.durationCount + 2,
+    durationSum: before.durationSum + 14.0,
+  }
+  const diff = diffPromSamples(before, now)
+  const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 20.1, ttft: 3.2, total: 60.0, rateWindow: "decode", tokens: 84, steps: 2 })
+  assert.ok(out !== null, "two steps, two TTFTs, matching tokens: this turn's")
+  assert.ok(out.includes("84 tok"), out)
+  assert.ok(out.includes("21423 prompt"), out)
+  // TTFT: the host's first step, not the engine's mean over both steps (4.5s).
+  assert.ok(out.includes("ttft 3.20s"), out)
+  assert.ok(!out.includes("4.50"), out)
+  // Rate and total are the host's; the engine's are per-request means.
+  assert.ok(out.includes("20.1 tok/s"), out)
+  assert.ok(out.includes("60.00s"), out)
+})
+
+test("Prometheus: the measured 3-step turn with a title request is declined", () => {
+  const diff = { completionTokens: 459, promptTokens: 30000, cachedTokens: 0, ttft: 2.0, ttftExact: false,
+    requests: { ttft: 4, duration: 4 } }
+  assert.equal(formatPromLine(diff, "vllm-mlx", "m", { tokens: 316, steps: 3 }), null)
+})
+
+test("Prometheus: a step count that matches but tokens that do not is declined", () => {
+  const diff = { completionTokens: 400, promptTokens: 30000, cachedTokens: 0, ttftExact: false,
+    requests: { ttft: 3, duration: 3 } }
+  assert.equal(formatPromLine(diff, "vllm-mlx", "m", { tokens: 316, steps: 3 }), null)
+})
+
 test("Prometheus: a window where no request started is declined too", () => {
   // Tokens arrived but no first token did: the tail of a request that began
   // in an earlier window, e.g. a turn interrupted and still generating.
@@ -456,7 +497,9 @@ test("Prometheus: the engine's own rate wins over Tier 1's", () => {
   const out = formatPromLine(diff, "LMDeploy", "m", { decodeTokS: 22.5, total: 2.2 })
   assert.ok(out.includes("41.7 tok/s"), out)
   assert.ok(!out.includes("22.5"), "the fallback must not leak through")
-  assert.ok(out.includes("1.20s"), "and the engine's own duration wins too")
+  // The total is what the user waited, so the host's wins over the engine's
+  // request duration, which excludes retries and anything before the step.
+  assert.ok(out.includes("2.20s"), out)
 })
 
 test("Prometheus: with neither rate available, no rate line is invented", () => {

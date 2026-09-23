@@ -1,3 +1,25 @@
+## [Unreleased]
+### Changed
+- A turn that calls tools is now measured as the whole turn, not its last
+  step. Tokens, cost and cache reuse are summed over every step; measured, a
+  316-token, 37s turn had shown `140 tok  10.20s`. Applies to the sidebar,
+  the collapsed line and history.
+- Turn time is what you waited, from the request to the last step's end,
+  and names any retries OpenCode made: `60.00s (6 retries)`.
+- `tok/s` is generation speed only: tokens over the time spent streaming
+  after each step's first token, so tool execution and prefill never count.
+  A turn that cannot be timed from its stream shows no rate, where it used to
+  show a whole-turn figure labelled `overall`.
+- TTFT is measured from the start of the attempt that succeeded, not from
+  the start of the turn.
+
+### Fixed
+- Prometheus engines declined every tool-using turn: its window holds one
+  request per step. One per step is now expected, with the engine's tokens
+  checked against the turn's total.
+- On a single-step Prometheus turn the total was the engine's request
+  duration, which excludes retries; it is now the total you waited.
+
 ## [0.2.2] – 2026-09-22
 ### Fixed
 - `vllm`, `sglang`, `vllmmlx`, `aphrodite` and `lmdeploy` rendered figures

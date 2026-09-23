@@ -29,7 +29,7 @@ import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
 import type { HttpOptions } from "./http"
-import { universalLine, turnRate, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
+import { universalLine, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
 import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
 
@@ -213,6 +213,9 @@ export default Plugin.define({
     // P1: `time.streamed` is stamped at completion, so the host cannot supply
     // a ttft. These marks are the only source. Keyed by assistant message id.
     const turns = new Map<string, Turn>()
+    // When each session's current execution started: the start of what the
+    // user waits for, which the turn's total runs from (retries included).
+    const execStart = new Map<string, number>()
     const turnFor = (id: string): Turn => {
       let t = turns.get(id)
       if (!t) {
@@ -304,6 +307,8 @@ export default Plugin.define({
         const line = formatPromLine(diff, label, model, {
           ...turnRate(diff.completionTokens, info, turn),
           tokens: hostTok,
+          steps: turn?.steps,
+          retries: turn?.retries,
         })
         if (line === null) tier2.sharedWindow = true
         return line
@@ -444,36 +449,20 @@ export default Plugin.define({
       // backwards for the assistant message.
       const msgs = ctx.data.session.message.list(sessionID)
       if (!msgs) return
-      let info: SessionMessageAssistant | undefined
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i]
-        if (m && m.type === "assistant") {
-          info = m
-          break
-        }
-      }
+      // The turn is every assistant message since the last user message: one
+      // per step when it calls tools. Reading only the last one showed
+      // `140 tok  10.20s` for a 316-token, 37s turn (measured, vllm-mlx).
+      const steps = turnSteps(msgs)
+      const agg = aggregateTurn(steps, turns, { execStart: execStart.get(sessionID) })
+      execStart.delete(sessionID)
+      const info = agg.info
+      const turn = agg.turn
       if (!info) return
-
-      // Diagnostics: the assistant messages that make up this turn. A turn
-      // that calls tools is several messages, one per step, and `info` above is
-      // only the LAST -- measured: the sidebar showed `41 tok  8.08s` for a
-      // tool-using turn OpenCode timed at 1m 31s. Logged only, to size the fix.
-      {
-        const steps: string[] = []
-        let first: number | undefined
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          const m = msgs[i]
-          if (!m) continue
-          if (m.type === "user") break
-          if (m.type !== "assistant") continue
-          const tok = (m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)
-          steps.unshift(`${tok}${m.finish ? `/${m.finish}` : ""}`)
-          first = m.time?.created ?? first
-        }
-        const last = info.time?.completed
-        const span = first !== undefined && last !== undefined ? ` span ${((last - first) / 1000).toFixed(2)}s` : ""
-        dbg(`turn: ${steps.length} assistant message(s) [${steps.join(", ")}]${span}`)
-      }
+      dbg(
+        `turn: ${steps.length} assistant message(s) [${steps
+          .map((m) => `${(m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)}${m.finish ? `/${m.finish}` : ""}`)
+          .join(", ")}]; retries ${turn?.retries ?? 0}`
+      )
 
       const provider = info.model?.providerID ?? ""
       const model = info.model?.id ?? ""
@@ -485,7 +474,6 @@ export default Plugin.define({
         show(`${provider}  ${short(model)}\n…`, sessionID, key)
       }
 
-      const turn = turns.get(info.id)
       // One signal for every fetch this turn. Each request still gets its own
       // timeout inside `http.ts`; this composes on top so teardown cancels
       // them all at once rather than leaving them to run the clock out.
@@ -550,7 +538,10 @@ export default Plugin.define({
         d.turns = record({ turns: d.turns }, rec).turns
       }).catch((e: unknown) => dbg(`history write failed: ${String(e)}`))
 
-      turns.delete(info.id)
+      // Every step's marks, not just the last: deleting only the last left one
+      // entry per earlier step behind (measured: `turns: size 1` after a
+      // two-step turn), to be swept only by the 64-entry bound.
+      for (const m of steps) turns.delete(m.id)
       dbg(`turns: size ${turns.size} after completing ${info.id}`)
       // History is written unconditionally above -- every completed turn is a
       // real record. Only the panel is last-writer-wins, and only the latest
@@ -578,6 +569,26 @@ export default Plugin.define({
         if (t.firstAt === undefined) t.firstAt = now
         t.lastAt = now
       }
+      // Each attempt at a step. OpenCode retries a step under the same message
+      // id (measured: seven starts for one message on a busy vllm-mlx), and
+      // only the final attempt's stream is the step's, so the marks restart.
+      off.push(
+        ctx.data.on("session.step.started", (evt) => {
+          const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
+          if (typeof id !== "string") return
+          const t = turnFor(id)
+          t.startAt = Date.now()
+          t.firstAt = undefined
+          t.lastAt = undefined
+          t.attempts = (t.attempts ?? 0) + 1
+        })
+      )
+      off.push(
+        ctx.data.on("session.execution.started", (evt) => {
+          const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
+          if (typeof sid === "string") execStart.set(sid, Date.now())
+        })
+      )
       off.push(ctx.data.on("session.text.delta", mark))
       off.push(ctx.data.on("session.reasoning.delta", mark))
 

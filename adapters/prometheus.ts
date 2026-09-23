@@ -300,28 +300,46 @@ export function formatPromLine(
   diff: PromDiff,
   label: string,
   model: string,
-  fallback: { decodeTokS?: number; total?: number; rateWindow?: "decode" | "whole"; tokens?: number }
+  fallback: {
+    decodeTokS?: number
+    ttft?: number
+    total?: number
+    rateWindow?: "decode" | "whole"
+    tokens?: number
+    /** Assistant messages in the turn; a tool-using turn is one per step. */
+    steps?: number
+    retries?: number
+  }
 ): string | null {
-  if (!diff.ttftExact) return null
+  // One TTFT per step: a tool-using turn makes one request per step, so its
+  // window legitimately holds several. Anything else is another request.
+  const steps = fallback.steps ?? 1
+  const ttftCount = diff.requests?.ttft ?? (diff.ttftExact ? 1 : -1)
+  if (ttftCount !== steps) return null
   const host = fallback.tokens
   if (host !== undefined && host > 0 && host !== diff.completionTokens) return null
-  const decodeTokS = diff.decodeTokS ?? fallback.decodeTokS
-  // The engine's own figure is a decode phase and needs no qualifier — the
-  // ttft beside it explains the rest of the turn. A whole-turn FALLBACK is
-  // qualified, because it measures something different (~10x apart on a turn
-  // with a long wait) and must not pass as a decode rate.
-  const isDecode = diff.decodeTokS !== undefined || fallback.rateWindow === "decode"
-  const overall = isDecode ? "" : " overall"
-  const total = diff.durationS ?? fallback.total
-  const ttftLabel =
-    diff.ttft !== undefined ? `  ttft ${nn(diff.ttft, 2)}s` : ""
+  const single = steps === 1
+  // The rate is generation only. The engine's own decode rate (duration minus
+  // TTFT, one request) wins where it exists; otherwise the host's, which is
+  // also measured from the stream after the first token. Over several steps
+  // the engine's figures are per-request means, so the host's are used.
+  const decodeTokS = (single ? diff.decodeTokS : undefined) ?? fallback.decodeTokS
+  const isDecode = decodeTokS !== undefined && (diff.decodeTokS !== undefined || fallback.rateWindow !== "whole")
+  const overall = decodeTokS !== undefined && !isDecode ? " overall" : ""
+  // The total is what the user waited: the host's, retries included. The
+  // engine's request duration excludes retries and anything before the step.
+  const total = fallback.total ?? (single ? diff.durationS : undefined)
+  const r = fallback.retries ?? 0
+  const retries = r > 0 ? ` (${r} ${r === 1 ? "retry" : "retries"})` : ""
+  const ttft = single ? diff.ttft : fallback.ttft
+  const ttftLabel = ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""
   return [
     `${label}  ${short(model)}`,
     decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}` : ttftLabel.trim(),
-    diff.prefillTokS !== undefined ? `prefill ${ni(diff.prefillTokS)} tok/s` : "",
+    single && diff.prefillTokS !== undefined ? `prefill ${ni(diff.prefillTokS)} tok/s` : "",
     `${ni(diff.completionTokens)} tok  (${ni(diff.promptTokens)} prompt${
       diff.cachedTokens > 0 ? `, ${ni(diff.cachedTokens)} cached` : ""
-    })${total !== undefined ? `  ${nn(total, 2)}s` : ""}`,
+    })${total !== undefined ? `  ${nn(total, 2)}s${retries}` : ""}`,
   ]
     .filter(Boolean)
     .join("\n")

@@ -24,6 +24,12 @@ export interface Turn {
    * instead. 0 means at least one step could not be timed: no decode rate.
    */
   streamMs?: number
+  /** Attempts OpenCode made at this step (`session.step.started` count). */
+  attempts?: number
+  /** Retries across the turn: attempts beyond the first, summed over steps. */
+  retries?: number
+  /** Assistant messages in the turn, when aggregated; one per step. */
+  steps?: number
 }
 
 /**
@@ -82,15 +88,11 @@ export function turnRate(
       rateWindow = "decode"
     }
   }
-  // Fall back to a whole-request rate when the stream window was too short to
-  // time. `rateWindow` says which one this is, because the two differ by an
-  // order of magnitude on a turn with a long wait before the first token
-  // (measured: 38.1 tok/s over a 0.97s decode window vs 3.7 over 10.03s
-  // total) and presenting either as the other is indefensible.
-  if (decodeTokS === undefined && tokens > 0 && total !== undefined && total > 0) {
-    decodeTokS = tokens / total
-    rateWindow = "whole"
-  }
+  // No whole-request fallback. Tokens over total time counts prefill and
+  // everything before the first token, so it is not a generation rate; a turn
+  // that cannot be timed from its stream shows no rate rather than that one
+  // (decided 2026-09-23). `rateWindow` stays in the result: history rows
+  // recorded before this still carry "whole" and are rendered labelled.
   return { decodeTokS, ttft, total, rateWindow }
 }
 
@@ -120,8 +122,11 @@ export function turnSteps(
  * - tokens, reasoning, cost and cache reuse are summed over the steps;
  * - `input` is the LAST step's: the context the turn ended at, which is what
  *   a prompt/limit figure means (summing would count the prompt per step);
- * - the span runs from the first step's start to the last step's end, which
- *   is what OpenCode's own footer measures (37.13s against its 37.2s);
+ * - the total runs from `opts.execStart` (the execution starting) to the
+ *   last step's end: what the user waited, retries included. Without it,
+ *   from the first step's creation, which matched OpenCode's footer on a
+ *   turn with no retries (37.13s against 37.2s) but covered only 14.87s of
+ *   a 60s turn that retried one step six times;
  * - ttft is the first step's; the decode window is the sum of each step's
  *   own stream window, so tool execution between steps is not counted as
  *   decoding. If any step has no marks, there is no decode window at all
@@ -129,7 +134,8 @@ export function turnSteps(
  */
 export function aggregateTurn(
   steps: readonly SessionMessageAssistant[],
-  marks: ReadonlyMap<string, Turn>
+  marks: ReadonlyMap<string, Turn>,
+  opts: { execStart?: number } = {}
 ): { info: SessionMessageAssistant | undefined; turn: Turn | undefined } {
   const first = steps[0]
   const last = steps[steps.length - 1]
@@ -143,6 +149,7 @@ export function aggregateTurn(
   let sawCost = false
   let streamMs = 0
   let timed = true
+  let retries = 0
   for (const m of steps) {
     output += m.tokens?.output ?? 0
     reasoning += m.tokens?.reasoning ?? 0
@@ -153,13 +160,14 @@ export function aggregateTurn(
       sawCost = true
     }
     const t = marks.get(m.id)
+    retries += Math.max(0, (t?.attempts ?? 1) - 1)
     if (t?.firstAt !== undefined && t.lastAt !== undefined && t.lastAt > t.firstAt) streamMs += t.lastAt - t.firstAt
     else timed = false
   }
 
   const info: SessionMessageAssistant = {
     ...last,
-    time: { created: first.time.created, completed: last.time?.completed },
+    time: { created: opts.execStart ?? first.time.created, completed: last.time?.completed },
     tokens: {
       input: last.tokens?.input ?? 0,
       output,
@@ -175,6 +183,8 @@ export function aggregateTurn(
     firstAt: firstMarks?.firstAt,
     lastAt: lastMarks?.lastAt,
     streamMs: timed ? streamMs : 0,
+    retries,
+    steps: steps.length,
   }
   return { info, turn }
 }
@@ -249,7 +259,11 @@ export function universalLine(
       ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}`
       : ttftLabel.trim()
   // OpenCode's output count excludes reasoning, so the topline adds them back.
-  const totals = `${tokensLabel(generated, reason)}${total !== undefined ? `  ${nn(total, 2)}s` : ""}`
+  // Retries are part of the total the user waited, so they are named beside
+  // it; without that, a 60s total over 15s of model work reads as a slow model.
+  const r = turn?.retries ?? 0
+  const retries = r > 0 ? ` (${r} ${r === 1 ? "retry" : "retries"})` : ""
+  const totals = `${tokensLabel(generated, reason)}${total !== undefined ? `  ${nn(total, 2)}s${retries}` : ""}`
 
   // Cost and cache reuse, both from the host rather than any engine — so
   // every provider gets them, including cloud models where Tier 2 never

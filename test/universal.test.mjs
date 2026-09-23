@@ -73,12 +73,18 @@ test("missing token counts yield no rate rather than zero", () => {
   assert.equal(turnRate(0, info, undefined).decodeTokS, undefined)
 })
 
-test("a zero-length stream window falls back to whole-request time", () => {
+// The rate is generation only: tokens over the time spent streaming after the
+// first token. A turn that cannot be timed that way gets no rate. A whole-turn
+// figure (tokens over total time) once stood in, labelled `overall`, but it
+// counts prefill and everything before the first token, so it is not a rate
+// in the sense this panel means (decided 2026-09-23).
+
+test("a zero-length stream window yields no rate, not a whole-request one", () => {
   const info = { tokens: { output: 50 }, time: { created: START, completed: START + 2_000 } }
-  // firstAt == lastAt: nothing to measure across, so the fallback applies.
   const turn = { startAt: START, firstAt: START + 100, lastAt: START + 100 }
-  const { decodeTokS } = turnRate(50, info, turn)
-  assert.ok(Math.abs(decodeTokS - 25) < 0.01, `expected 50/2s, got ${decodeTokS}`)
+  const r = turnRate(50, info, turn)
+  assert.equal(r.decodeTokS, undefined, `50/2s would include prefill: ${r.decodeTokS}`)
+  assert.equal(r.total, 2, "the total is still shown")
 })
 
 test("TTFT comes from the first delta, not from completion", () => {
@@ -101,14 +107,13 @@ test("a streamed turn leaves its decode rate unqualified", () => {
   assert.ok(!universalLine("mtplx", "m", info, turn).includes("overall"))
 })
 
-test("a whole-turn fallback rate is qualified as overall", () => {
+test("with no stream marks at all there is no rate, and nothing says overall", () => {
   const info = { time: { created: 1000, completed: 11030 }, tokens: { input: 0, output: 37, reasoning: 0, cache: { read: 0, write: 0 } } }
   const r = turnRate(37, info, undefined)
-  assert.equal(r.rateWindow, "whole")
-  // 37 over the full 10.03s — a different number entirely, so it must not
-  // claim to be a decode rate.
-  assert.ok(Math.abs(r.decodeTokS - 3.7) < 0.1, String(r.decodeTokS))
-  assert.ok(universalLine("mtplx", "m", info, undefined).includes("tok/s overall"))
+  assert.equal(r.decodeTokS, undefined)
+  const line = universalLine("mtplx", "m", info, undefined)
+  assert.ok(!line.includes("tok/s"), line)
+  assert.ok(line.includes("37 tok  10.03s"), line)
 })
 
 test("ttft falls back to the message's created, not only turn.startAt", () => {
@@ -284,10 +289,43 @@ test("cost and cache reuse are summed per turn; the prompt is the last step's", 
   assert.equal(info.tokens.input, 7500)
 })
 
-test("a step with no stream marks makes the rate whole-turn, labelled overall", () => {
+test("a step with no stream marks leaves the turn with no rate", () => {
   const partial = new Map([...marks].filter(([k]) => k !== "a2"))
   const { info, turn } = aggregateTurn(turnSteps(toolTurn), partial)
-  assert.equal(turnRate(316, info, turn).rateWindow, "whole")
+  assert.equal(turnRate(316, info, turn).decodeTokS, undefined)
+})
+
+// Turn time is the total the user waited: from the execution starting to the
+// last step ending, retries and all. Measured: vllm-mlx retried one step six
+// times over ~52s; the messages alone spanned 14.87s of a 60s turn.
+test("the total runs from the execution start when one is known", () => {
+  const { info, turn } = aggregateTurn(turnSteps(toolTurn), marks, { execStart: T0 - 23_000 })
+  assert.ok(Math.abs(turnRate(316, info, turn).total - 60.13) < 0.001)
+})
+
+test("ttft is from the successful attempt's start, not the execution start", () => {
+  // The 23s before the step (retries, snapshotting, a queued title request)
+  // is in the total, never in the ttft.
+  const { info, turn } = aggregateTurn(turnSteps(toolTurn), marks, { execStart: T0 - 23_000 })
+  assert.ok(Math.abs(turnRate(316, info, turn).ttft - 7.4) < 0.001)
+})
+
+test("retries are counted per step and shown beside the total", () => {
+  const retried = new Map(marks)
+  retried.set("a1", { ...marks.get("a1"), attempts: 7 })
+  const { info, turn } = aggregateTurn(turnSteps(toolTurn), retried, { execStart: T0 - 23_000 })
+  assert.equal(turn.retries, 6)
+  const line = universalLine("vllmmlx", "m", info, turn)
+  assert.ok(line.includes("60.13s (6 retries)"), line)
+})
+
+test("one retry is singular, and none says nothing", () => {
+  const once = new Map(marks)
+  once.set("a2", { ...marks.get("a2"), attempts: 2 })
+  const r1 = aggregateTurn(turnSteps(toolTurn), once)
+  assert.ok(universalLine("x", "m", r1.info, r1.turn).includes("(1 retry)"))
+  const r0 = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.ok(!universalLine("x", "m", r0.info, r0.turn).includes("retr"))
 })
 
 test("a one-step turn aggregates to exactly that step", () => {
