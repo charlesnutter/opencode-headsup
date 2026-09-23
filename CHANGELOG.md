@@ -1,9 +1,11 @@
-## [Unreleased]
+## [0.2.3] – 2026-09-23
 ### Changed
 - A turn that calls tools is now measured as the whole turn, not its last
   step. Tokens, cost and cache reuse are summed over every step; measured, a
   316-token, 37s turn had shown `140 tok  10.20s`. Applies to the sidebar,
-  the collapsed line and history.
+  the collapsed line and history. The engine line from `mtplx`, `koboldcpp`
+  and `mlxserve`, which report the latest request, still describes a tool
+  turn's last step; reading them per step follows in a later release.
 - Turn time is what you waited, from the request to the last step's end,
   and names any retries OpenCode made: `60.00s (6 retries)`.
 - `tok/s` is generation speed only: tokens over the time spent streaming
