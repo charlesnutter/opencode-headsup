@@ -596,6 +596,21 @@ export default Plugin.define({
           .map((m) => `${(m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)}${m.finish ? `/${m.finish}` : ""}`)
           .join(", ")}]; retries ${turn?.retries ?? 0}`
       )
+      // Diagnostics for sub-agent roll-ups: which session this turn is, its
+      // parent if it is a sub-agent, and the session tree OpenCode reports.
+      if (HUD_DEBUG) {
+        try {
+          const parent = ctx.data.session.get(sessionID)?.parentID
+          const family = ctx.data.session.family(sessionID)
+          const recorded = family.map((id) => `${id}:${history.turns.filter((t) => t.sessionID === id).length}`)
+          dbg(
+            `  session ${sessionID}${parent ? ` (sub-agent of ${parent})` : ""}; family [${recorded.join(", ")}]; ` +
+              `status ${family.map((id) => ctx.data.session.status(id)).join("/")}`
+          )
+        } catch (e: unknown) {
+          dbg(`  session lookup threw: ${String(e)}`)
+        }
+      }
 
       const provider = info.model?.providerID ?? ""
       const model = info.model?.id ?? ""
@@ -788,6 +803,17 @@ export default Plugin.define({
         off.push(
           ctx.data.on("session.execution.started", (evt) => {
             dbg(`event execution.started ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.created", (evt) => {
+            const d = (evt as { data?: { sessionID?: string; parentID?: string } }).data
+            dbg(`event session.created ${d?.sessionID ?? "?"}${d?.parentID ? ` parent ${d.parentID}` : ""}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.execution.succeeded", (evt) => {
+            dbg(`event execution.succeeded ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
           })
         )
         off.push(
