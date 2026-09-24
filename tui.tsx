@@ -213,10 +213,47 @@ export default Plugin.define({
       }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
     }
 
+    // Theme colours, looked up defensively. The runtime theme's shape does
+    // not match the installed types: on OpenCode 2.0.12 `ctx.theme.background`
+    // was undefined and reading `.surface.offset` crashed the slot. Other
+    // plugins use at least three shapes (text.subdued; text.muted/text.base;
+    // textMuted; background.raised.base), so each known path is tried and a
+    // missing colour means "no colour", never a throw.
+    const themeColor = (...paths: string[]): unknown => {
+      for (const path of paths) {
+        let v: unknown = ctx.theme
+        for (const k of path.split(".")) v = v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined
+        if (v !== undefined && v !== null && typeof v !== "function") return v
+      }
+      return undefined
+    }
+    type Color = Parameters<typeof ctx.theme.increase>[0]
+    const subduedColor = (): Color | undefined =>
+      themeColor("text.subdued", "text.muted", "textMuted", "text.subtle") as Color | undefined
+    const panelColor = (): Color | undefined =>
+      themeColor("background.surface.offset", "background.raised.base", "backgroundPanel", "backgroundElement") as
+        | Color
+        | undefined
+    if (HUD_DEBUG) {
+      try {
+        const shape = (o: unknown, depth: number): string =>
+          o && typeof o === "object" && depth > 0
+            ? `{${Object.keys(o as object)
+                .slice(0, 24)
+                .map((k) => `${k}:${shape((o as Record<string, unknown>)[k], depth - 1)}`)
+                .join(",")}}`
+            : typeof o
+        dbg(`theme shape: ${shape(ctx.theme, 3)}`)
+        dbg(`theme picks: subdued ${subduedColor() !== undefined}, panel ${panelColor() !== undefined}`)
+      } catch (e: unknown) {
+        dbg(`theme inspection threw: ${String(e)}`)
+      }
+    }
+
     // One box. Theme colours throughout, so it follows the user's theme:
     // bold heading, subdued labels and notes, default-coloured values.
     const drawBox = (view: TurnView, suffix: string, open: boolean, toggle: () => void, first: boolean) => {
-      const subdued = ctx.theme.text.subdued
+      const subdued = subduedColor()
       return (
         <box
           flexDirection="column"
@@ -227,7 +264,7 @@ export default Plugin.define({
           paddingRight={1}
           paddingTop={open ? 1 : 0}
           paddingBottom={open ? 1 : 0}
-          backgroundColor={cfg.display.background ? ctx.theme.background.surface.offset : undefined}
+          backgroundColor={cfg.display.background ? panelColor() : undefined}
         >
           <text selectable={false} onMouseDown={toggle}>
             <b>{`${open ? "▾" : "▸"} ${view.engine}${suffix}`}</b>
