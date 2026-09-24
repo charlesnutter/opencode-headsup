@@ -2,7 +2,7 @@
 ### Added
 - A **Session** section below the per-turn figures, collapsed by default:
   click its heading to open it. Collapsed, it still shows the session's
-  generation speed (`▸ Session · 14 turns · 48.2 tok/s avg`). Open, it
+  generation speed (`▸ Session · 14 turns  48.2 tok/s`). Open, it
   shows generation tok/s with a trend of recent turns, TTFT median and
   worst, cache hit rate, how the time split between generating, waiting
   for the first token and everything else, the engine's own averages
@@ -11,8 +11,8 @@
   when the model changed partway through. The session's tokens, context
   and cost are left to OpenCode's own sidebar.
 - Sub-agent roll-ups. A turn that started sub-agents adds a line to the
-  per-turn figures, `+2 sub-agents  4210 tok  38.10s  $0.012`: their tokens
-  and cost summed, and the time from the first starting to the last
+  per-turn figures (`sub-agents  2 · 4,210 tok`, then `38.10s` and
+  `$0.012` on the rows below): their tokens and cost summed, and the time from the first starting to the last
   finishing. Rates are never combined across them. The Session section
   totals them in a `sub-agents` row, and its time split gives the real time
   sub-agents were running its own share instead of folding it into `other`.
@@ -22,8 +22,8 @@
   turn's requests and tokens plus the sub-agents'. Those figures then cover
   both, and the line says `incl. sub-agents`. Rate and TTFT stay the turn's
   own. Built and tested against captures; not yet run live.
-- `background` option (default on): the theme's offset shade behind each
-  box.
+- `background` option (default on): shades each box one step above the
+  sidebar's own background.
 
 ### Changed
 - The sidebar is two boxes, the last turn and the session, each opened and
