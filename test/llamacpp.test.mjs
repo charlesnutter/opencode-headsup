@@ -14,6 +14,7 @@ import {
   diffLlamaCppCounters,
   formatLlamaCppLine,
   llamaCppIsThisTurn,
+  llamaCppView,
 } from "../adapters/llamacpp.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
@@ -120,16 +121,16 @@ test("a near-total prefix-cache hit yields a plausible rate, not an absurd one",
 })
 
 // ---- rendering --------------------------------------------------------------
-test("renders four lines, labelled for whichever server it is", () => {
+test("renders a row per figure, headed by whichever server it is", () => {
   const t = diffLlamaCppCounters(before, after)
-  const out = formatLlamaCppLine(t, "llama.cpp", "qwen2.5-0.5b-instruct-q4_k_m").split("\n")
-  assert.equal(out.length, 4)
-  assert.ok(out[0].startsWith("llama.cpp  "))
-  assert.ok(/^\d+\.\d tok\/s$/.test(out[1]), out[1])
-  assert.ok(out[2].startsWith("prefill "))
-  assert.ok(out[3].startsWith("32 tok"))
-  // llamafile shares this adapter; only the label changes.
-  assert.ok(formatLlamaCppLine(t, "llamafile", "m").startsWith("llamafile  "))
+  const v = llamaCppView(t, "llama.cpp")
+  assert.equal(v.engine, "llama.cpp")
+  assert.deepEqual(v.rows.map(([l]) => l), ["speed", "prefill", "tokens", "time"])
+  const rows = Object.fromEntries(v.rows)
+  assert.ok(/^\d+\.\d tok\/s$/.test(rows.speed), rows.speed)
+  assert.equal(rows.tokens, "32")
+  // llamafile shares this adapter; only the heading changes.
+  assert.equal(llamaCppView(t, "llamafile").engine, "llamafile")
 })
 
 test("missing rates are omitted, never rendered as placeholders", () => {
@@ -140,7 +141,8 @@ test("missing rates are omitted, never rendered as placeholders", () => {
   })
   const out = formatLlamaCppLine(t, "llama.cpp", "m")
   assert.ok(!out.includes("?"), out)
-  assert.equal(out.split("\n").length, 2)
+  const labels = llamaCppView(t, "llama.cpp").rows.map(([l]) => l)
+  assert.ok(!labels.includes("speed") && !labels.includes("prefill"), labels.join(","))
 })
 
 // ---- is the window this turn's? ---------------------------------------------
@@ -166,7 +168,13 @@ test("with no host count to compare, the check does not apply", () => {
 test("the total is OpenCode's -- what you waited -- with retries named", () => {
   const t = diffLlamaCppCounters(before, after)
   const out = formatLlamaCppLine(t, "llama.cpp", "m", 0.3, { total: 7.0, retries: 1 })
-  assert.ok(out.includes("32 tok  7.00s (1 retry)"), out)
+  assert.ok(out.includes("tokens 32\ntime 7.00s\n1 retry"), out)
+})
+
+test("figures that include a same-engine sub-agent say so", () => {
+  const t = diffLlamaCppCounters(before, after)
+  const out = formatLlamaCppLine(t, "llama.cpp", "m", 0.3, { total: 7.0, includesSubagents: true })
+  assert.ok(out.includes("tokens 32\nincl. sub-agents"), out)
 })
 
 console.log(`\n${passed} passed`)

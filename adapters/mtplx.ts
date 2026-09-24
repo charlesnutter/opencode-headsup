@@ -15,7 +15,8 @@
 // whose output nothing could assert against.
 
 import { httpJson, type HttpOptions } from "../http"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, viewText, nt, type Row, type TurnView } from "../rows"
 
 /**
  * The fields this plugin reads. All optional — see the note above about
@@ -99,66 +100,56 @@ export function combineMtplxSteps(
 }
 
 /**
- * `host.total` is the turn's total from OpenCode -- what the user waited,
- * retries included -- and wins over the receipt's `request_elapsed_s`,
- * which is one request's duration.
+ * The turn as labelled rows. `host.total` is the turn's total from OpenCode
+ * -- what the user waited, retries included -- and wins over the receipt's
+ * `request_elapsed_s`, which is one request's duration.
+ *
+ * Interrupted turns lack ttft and prefill (the live capture has no such
+ * keys), so each figure is its own optional row rather than a placeholder.
  */
-export function formatMtplxLine(
+export function mtplxView(
   l: MtplxLatest,
-  model: string,
   host: { total?: number; retries?: number } = {}
-): string {
+): TurnView {
   const decode = num(l.decode_tok_s)
   const ttft = num(l.ttft_s)
   const prefill = num(l.prefill_tok_s)
   const completion = num(l.completion_tokens)
   const elapsed = host.total ?? num(l.request_elapsed_s)
-  const r = host.retries ?? 0
-  const retries = r > 0 ? ` (${r} ${r === 1 ? "retry" : "retries"})` : ""
   const verify = num(l.verify_calls)
+  const r = host.retries ?? 0
 
-  // Rate and TTFT share a line but are independently available: an
-  // interrupted turn has the rate and not the TTFT.
-  const rate = [
-    decode !== undefined ? `${nn(decode)} tok/s` : "",
-    ttft !== undefined ? `ttft ${nn(ttft, 2)}s` : "",
+  const rows: Row[] = [
+    ...rowsOf("speed", [decode !== undefined ? `${nn(decode)} tok/s` : ""]),
+    ...rowsOf("ttft", [ttft !== undefined ? `${nn(ttft, 2)}s` : ""]),
+    ...rowsOf("prefill", [prefill !== undefined ? `${ni(prefill)} tok/s` : ""]),
+    // No think/answer split: the 342-key receipt holds no reasoning count
+    // (checked against a turn whose usage reported 23 of 64 as reasoning).
+    // completion_tokens already includes reasoning, so the total is right.
+    ...rowsOf("tokens", [completion !== undefined ? nt(completion) : ""]),
+    ...rowsOf("time", [
+      elapsed !== undefined ? `${nn(elapsed, 2)}s` : "",
+      r > 0 ? `${r} ${r === 1 ? "retry" : "retries"}` : "",
+    ]),
   ]
-    .filter(Boolean)
-    .join("  ")
-
-  // Speculative decoding: tokens committed per verify pass, with the
-  // per-depth acceptance probabilities MTPLX reports alongside.
-  let mtp = ""
+  // Speculative decoding: tokens committed per verify pass, and MTPLX's
+  // per-depth acceptance probabilities.
   if (verify !== undefined && verify > 0 && completion !== undefined) {
-    const acc = Array.isArray(l.mean_accept_probability_by_depth)
-      ? l.mean_accept_probability_by_depth.map((p) => Math.round(p * 100)).join("/")
-      : null
-    mtp = `MTP ${nn(completion / verify, 2)}x${acc ? ` ${acc}%` : ""}`
+    rows.push(["MTP", `${nn(completion / verify, 2)}x`])
+    if (Array.isArray(l.mean_accept_probability_by_depth)) {
+      rows.push(["accepted", `${l.mean_accept_probability_by_depth.map((p) => Math.round(p * 100)).join("/")}%`])
+    }
   }
+  return { engine: "MTPLX", rows, notes: [], key: decode !== undefined ? `${nn(decode)} tok/s` : undefined }
+}
 
-  // No think/answer split: a live capture's `latest` was searched key by
-  // key, nested objects included, against a turn whose own response `usage`
-  // reported 23 of 64 completion tokens as reasoning, and no field anywhere
-  // in the 342-key receipt held that number. /metrics does not carry it,
-  // unlike the per-response `usage` block MTPLX returns from
-  // /v1/chat/completions — this adapter only ever sees the former.
-  // completion_tokens does follow the OpenAI convention (it already includes
-  // reasoning), so the total itself is correct; only the "(N think)" subset
-  // tokensLabel can render elsewhere is unavailable here.
-  const totals =
-    completion !== undefined
-      ? `${ni(completion)} tok${elapsed !== undefined ? `  ${nn(elapsed, 2)}s${retries}` : ""}`
-      : ""
-
-  return [
-    `MTPLX  ${short(model)}`,
-    rate,
-    prefill !== undefined ? `prefill ${ni(prefill)} tok/s` : "",
-    totals,
-    mtp,
-  ]
-    .filter(Boolean)
-    .join("\n")
+/** The view as text; kept for tests that look for a figure. */
+export function formatMtplxLine(
+  l: MtplxLatest,
+  _model: string,
+  host: { total?: number; retries?: number } = {}
+): string {
+  return viewText(mtplxView(l, host))
 }
 
 export async function fetchMtplxLatest(

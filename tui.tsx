@@ -29,32 +29,34 @@ import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
 import type { HttpOptions } from "./http"
-import { universalLine, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
-import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
-import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
+import { universalView, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
+import { record, historyLines, type History, type TurnRecord } from "./history"
+import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
+import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
+import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
 
-import { fetchMtplxLatest, formatMtplxLine, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
-import { fetchOmlxSample, formatOmlxLine, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
+import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
+import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
 import {
   fetchLlamaCppCounters,
   diffLlamaCppCounters,
-  formatLlamaCppLine,
+  llamaCppView,
   llamaCppIsThisTurn,
   type LlamaCppCounters,
 } from "./adapters/llamacpp"
-import { fetchMlxServeRequests, mlxServeTurn, formatMlxServeLine, combineMlxServeSteps, type MlxServeRequest } from "./adapters/mlxserve"
+import { fetchMlxServeRequests, mlxServeTurn, mlxServeView, combineMlxServeSteps, type MlxServeRequest } from "./adapters/mlxserve"
 import {
   fetchSplashSample,
   diffSplashSamples,
-  formatSplashLine,
+  splashView,
   splashIsThisTurn,
   type SplashSample,
 } from "./adapters/splash"
-import { fetchKoboldPerf, koboldTurn, formatKoboldLine, combineKoboldSteps, type KoboldPerf } from "./adapters/koboldcpp"
+import { fetchKoboldPerf, koboldTurn, koboldView, combineKoboldSteps, type KoboldPerf } from "./adapters/koboldcpp"
 import {
   fetchPromSample,
   diffPromSamples,
-  formatPromLine,
+  promView,
   VLLM_SPEC,
   SGLANG_SPEC,
   VLLM_MLX_SPEC,
@@ -122,6 +124,7 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
     mlxServeKey: str(options["mlxServeApiKey"], "MLX_API_KEY", ""),
     display: {
       context: bool(options["showContext"], DEFAULT_DISPLAY.context),
+      background: bool(options["background"], DEFAULT_DISPLAY.background),
     },
   }
 }
@@ -152,6 +155,8 @@ interface Baselines {
 /** Durable UI preference, independent of any one turn. */
 interface UiState {
   collapsed: boolean
+  /** The Session section is expanded. Collapsed by default. */
+  sessionOpen?: boolean
 }
 
 // ---- entry ------------------------------------------------------------------
@@ -201,6 +206,95 @@ export default Plugin.define({
       setUi((d) => {
         d.collapsed = !d.collapsed
       }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
+    }
+    const toggleSession = (): void => {
+      setUi((d) => {
+        d.sessionOpen = !d.sessionOpen
+      }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
+    }
+
+    // Theme colours, looked up defensively. The runtime theme's shape does
+    // not match the installed types: on OpenCode 2.0.12 `ctx.theme.background`
+    // was undefined and reading `.surface.offset` crashed the slot. Other
+    // plugins use at least three shapes (text.subdued; text.muted/text.base;
+    // textMuted; background.raised.base), so each known path is tried and a
+    // missing colour means "no colour", never a throw.
+    const themeColor = (...paths: string[]): unknown => {
+      for (const path of paths) {
+        let v: unknown = ctx.theme
+        for (const k of path.split(".")) v = v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined
+        if (v !== undefined && v !== null && typeof v !== "function") return v
+      }
+      return undefined
+    }
+    type Color = Parameters<typeof ctx.theme.increase>[0]
+    // Measured on OpenCode 2.0.12: text is {base, muted, ...}; `muted` is
+    // the grey. `subdued` is what the installed types declare.
+    const subduedColor = (): Color | undefined =>
+      themeColor("text.muted", "text.subdued", "textMuted") as Color | undefined
+    const panelColor = (): Color | undefined =>
+      // Measured on OpenCode 2.0.12: background is {base, raised:{base, high,
+      // max}}. raised.base is the sidebar's own colour (the boxes rendered
+      // unshaded on it), so the box takes the next step up.
+      themeColor("background.raised.high", "background.surface.offset", "backgroundElement", "backgroundPanel") as
+        | Color
+        | undefined
+    if (HUD_DEBUG) {
+      try {
+        const shape = (o: unknown, depth: number): string =>
+          o && typeof o === "object" && depth > 0
+            ? `{${Object.keys(o as object)
+                .slice(0, 24)
+                .map((k) => `${k}:${shape((o as Record<string, unknown>)[k], depth - 1)}`)
+                .join(",")}}`
+            : typeof o
+        dbg(`theme shape: ${shape(ctx.theme, 3)}`)
+        dbg(`theme picks: subdued ${subduedColor() !== undefined}, panel ${panelColor() !== undefined}`)
+      } catch (e: unknown) {
+        dbg(`theme inspection threw: ${String(e)}`)
+      }
+    }
+
+    // One box. Theme colours throughout, so it follows the user's theme:
+    // bold heading, subdued labels and notes, default-coloured values.
+    const drawBox = (view: TurnView, suffix: string, open: boolean, toggle: () => void, first: boolean) => {
+      const subdued = subduedColor()
+      return (
+        <box
+          flexDirection="column"
+          marginLeft={1}
+          marginRight={1}
+          marginTop={first ? 0 : 1}
+          // 2 columns at the sides against 1 row top and bottom: a terminal
+          // cell is about twice as tall as it is wide, so this reads as even
+          // padding all round (chosen from the mockup, option A).
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          paddingBottom={1}
+          backgroundColor={cfg.display.background ? panelColor() : undefined}
+        >
+          <text selectable={false} onMouseDown={toggle}>
+            <b>{`${open ? "▾" : "▸"} ${view.engine}${suffix}`}</b>
+            {!open && view.key ? <span style={{ fg: subdued }}>{`  ${view.key}`}</span> : null}
+          </text>
+          {open && (view.rows.length > 0 || view.notes.length > 0) ? (
+            <box flexDirection="column" marginTop={1}>
+              {view.rows.map(([label, value]) => (
+                <text selectable={false}>
+                  <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
+                  {value}
+                </text>
+              ))}
+              {view.notes.map((note) => (
+                <text selectable={false} fg={subdued}>
+                  {note}
+                </text>
+              ))}
+            </box>
+          ) : null}
+        </box>
+      )
     }
 
     const show = (text: string, sessionID: string, key: string): void => {
@@ -273,10 +367,21 @@ export default Plugin.define({
        * other requests besides this turn: the engine figures were declined
        * as unattributable, and the line should say why they are missing.
        */
-      tier2: { pendingBaseline: boolean; sharedWindow: boolean },
+      tier2: {
+        pendingBaseline: boolean
+        sharedWindow: boolean
+        /** Engine-only figures of an accepted reading, for the history row. */
+        engine?: TurnRecord["engine"]
+      },
       /** The turn's assistant messages, one per step, oldest first. */
-      steps: readonly SessionMessageAssistant[]
-    ): Promise<string | null> {
+      steps: readonly SessionMessageAssistant[],
+      /**
+       * Sub-agents that ran on this same engine during the turn. A
+       * counter-difference engine's window holds their requests too, so its
+       * check expects the turn's tokens and steps plus theirs.
+       */
+      sameEngine?: TurnRecord["subagents"]
+    ): Promise<TurnView | null> {
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
       // host has the marks regardless of which tier renders the line. Passed
@@ -301,7 +406,7 @@ export default Plugin.define({
         spec: PromSpec,
         url: string,
         label: string
-      ): Promise<string | null> => {
+      ): Promise<TurnView | null> => {
         const now = await fetchPromSample(url, spec, http)
         if (!now) return null
         const prev = base.prom[id]
@@ -324,13 +429,17 @@ export default Plugin.define({
         // Tier 1 supplies the fallback rate and total wherever the engine has
         // no single-request figure of its own. Passed in rather than imported
         // by the adapter, so adapters stay leaves.
-        const line = formatPromLine(diff, label, model, {
-          ...turnRate(diff.completionTokens, info, turn),
-          tokens: hostTok,
-          steps: turn?.steps,
+        // The fallback rate is this turn's own generation: OpenCode's count
+        // over its streaming, never the window's, which can include sub-agents.
+        const line = promView(diff, label, model, {
+          ...turnRate(hostTok, info, turn),
+          tokens: windowTokens,
+          steps: windowSteps,
           retries: turn?.retries,
+          includesSubagents,
         })
         if (line === null) tier2.sharedWindow = true
+        else if ((turn?.steps ?? 1) === 1 && diff.prefillTokS !== undefined) tier2.engine = { prefillTokS: diff.prefillTokS }
         return line
       }
 
@@ -344,6 +453,11 @@ export default Plugin.define({
         return (await Promise.all(reads)) as Array<T | null>
       }
       const hostFigures = { total: turnRate(0, info, turn).total, retries: turn?.retries }
+      // What a counter-difference window should hold: this turn's tokens and
+      // steps, plus any sub-agents' on this same engine.
+      const windowTokens = hostTokens + (sameEngine?.tokens ?? 0)
+      const windowSteps = steps.length + (sameEngine?.steps ?? 0)
+      const includesSubagents = sameEngine !== undefined
 
       switch (provider) {
         case "mtplx": {
@@ -368,7 +482,12 @@ export default Plugin.define({
             if (receipts.every((r) => r !== null)) tier2.sharedWindow = true
             return null
           }
-          return formatMtplxLine(combined, model, hostFigures)
+          const verifies = combined.verify_calls ?? 0
+          tier2.engine = {
+            prefillTokS: combined.prefill_tok_s ?? undefined,
+            mtpX: verifies > 0 && combined.completion_tokens ? combined.completion_tokens / verifies : undefined,
+          }
+          return mtplxView(combined, hostFigures)
         }
 
         case "omlx": {
@@ -383,14 +502,15 @@ export default Plugin.define({
             // A window that isn't this turn's -- a spare request, or tokens
             // that don't match -- is declined. The no-baseline render below
             // is labelled as the server's averages and needs no check.
-            if (now.requests > prev.requests && !omlxIsThisTurn(prev, now, { tokens: hostTokens, steps: steps.length })) {
+            if (now.requests > prev.requests && !omlxIsThisTurn(prev, now, { tokens: windowTokens, steps: windowSteps })) {
               tier2.sharedWindow = true
               return null
             }
           }
-          return formatOmlxLine(now, prev, hostTtft, {
+          return omlxView(now, prev, hostTtft, {
             ...hostFigures,
             decodeTokS: turnRate(hostTokens, info, turn).decodeTokS,
+            includesSubagents,
           })
         }
 
@@ -414,11 +534,12 @@ export default Plugin.define({
           const t = diffLlamaCppCounters(prev, now)
           if (!t) return null
           match(t.completionTokens, `; steps ${steps.length}`)
-          if (!llamaCppIsThisTurn(t, hostTokens)) {
+          if (!llamaCppIsThisTurn(t, windowTokens)) {
             tier2.sharedWindow = true
             return null
           }
-          return formatLlamaCppLine(t, label, model, hostTtft, hostFigures)
+          tier2.engine = { prefillTokS: t.prefillTokS }
+          return llamaCppView(t, label, hostTtft, { ...hostFigures, includesSubagents })
         }
 
         case "splash": {
@@ -435,11 +556,12 @@ export default Plugin.define({
           const t = diffSplashSamples(prev, now)
           if (!t) return null
           match(t.completionTokens, `; requests ${t.requests}, steps ${steps.length}`)
-          if (!splashIsThisTurn(t, { tokens: hostTokens, steps: steps.length })) {
+          if (!splashIsThisTurn(t, { tokens: windowTokens, steps: windowSteps })) {
             tier2.sharedWindow = true
             return null
           }
-          return formatSplashLine(t, model, hostTtft, { ...hostFigures, steps: steps.length })
+          tier2.engine = { prefillTokS: t.prefillTokS, draftAccept: t.draftAcceptRate }
+          return splashView(t, hostTtft, { ...hostFigures, steps: windowSteps, includesSubagents })
         }
 
         case "koboldcpp":
@@ -461,7 +583,8 @@ export default Plugin.define({
               if (perfs.every((p) => p !== null)) tier2.sharedWindow = true
               return null
             }
-            return formatKoboldLine(combined, model, hostTtft, hostFigures)
+            tier2.engine = { prefillTokS: combined.prefillTokS, draftAccept: combined.draftAcceptRate }
+            return koboldView(combined, hostTtft, hostFigures)
           }
           // No per-step reads: one read now, which can only describe the
           // last request -- labelled as such when several landed.
@@ -473,7 +596,7 @@ export default Plugin.define({
           })
           const t = koboldTurn(perf, prev)
           if (t) match(t.completionTokens, `; generations ${t.generationsInWindow ?? "?"}`)
-          return t ? formatKoboldLine(t, model, hostTtft) : null
+          return t ? koboldView(t, hostTtft, hostFigures) : null
         }
 
         case "mlxserve":
@@ -493,7 +616,7 @@ export default Plugin.define({
             setBase((d) => {
               d.mlxServeId[cfg.mlxServeBase] = combined.requestId
             })
-            return formatMlxServeLine(combined, model, hostFigures)
+            return mlxServeView(combined, hostFigures)
           }
           const recs = await fetchMlxServeRequests(
             cfg.mlxServeBase,
@@ -508,7 +631,7 @@ export default Plugin.define({
           setBase((d) => {
             d.mlxServeId[cfg.mlxServeBase] = t.requestId
           })
-          return formatMlxServeLine(t, model)
+          return mlxServeView(t, hostFigures)
         }
 
         case "vllm":
@@ -573,6 +696,21 @@ export default Plugin.define({
           .map((m) => `${(m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)}${m.finish ? `/${m.finish}` : ""}`)
           .join(", ")}]; retries ${turn?.retries ?? 0}`
       )
+      // Diagnostics for sub-agent roll-ups: which session this turn is, its
+      // parent if it is a sub-agent, and the session tree OpenCode reports.
+      if (HUD_DEBUG) {
+        try {
+          const parent = ctx.data.session.get(sessionID)?.parentID
+          const family = ctx.data.session.family(sessionID)
+          const recorded = family.map((id) => `${id}:${history.turns.filter((t) => t.sessionID === id).length}`)
+          dbg(
+            `  session ${sessionID}${parent ? ` (sub-agent of ${parent})` : ""}; family [${recorded.join(", ")}]; ` +
+              `status ${family.map((id) => ctx.data.session.status(id)).join("/")}`
+          )
+        } catch (e: unknown) {
+          dbg(`  session lookup threw: ${String(e)}`)
+        }
+      }
 
       const provider = info.model?.providerID ?? ""
       const model = info.model?.id ?? ""
@@ -581,7 +719,7 @@ export default Plugin.define({
         // A model or provider switch replaces this session's line rather than
         // blending two engines' figures into one reading. Per session, so a
         // different model in another tab is not a switch here.
-        show(`${provider}  ${short(model)}\n…`, sessionID, key)
+        show(encodeView({ engine: provider, rows: [], notes: ["…"] }), sessionID, key)
       }
 
       // One signal for every fetch this turn. Each request still gets its own
@@ -589,10 +727,43 @@ export default Plugin.define({
       // them all at once rather than leaving them to run the clock out.
       const http: HttpOptions = { signal: life.signal }
 
-      const tier2 = { pendingBaseline: false, sharedWindow: false }
-      let line: string | null = null
+      // Sub-agents that ran during this turn, each in its own child session
+      // whose turns are recorded under that session (measured: the child's
+      // row existed, and the child had finished, 11s before the parent's turn
+      // ended). Their tokens, time and cost are summed onto one line; rates
+      // are never combined, since a sub-agent can run on another model.
+      let subagents: TurnRecord["subagents"]
+      let sameEngine: TurnRecord["subagents"]
       try {
-        line = await enrich(provider, model, info, turn, http, tier2, steps)
+        const descendants = ctx.data.session.family(sessionID).filter((id) => {
+          let p = ctx.data.session.get(id)?.parentID
+          for (let hops = 0; p && hops < 16; hops++) {
+            if (p === sessionID) return true
+            p = ctx.data.session.get(p)?.parentID
+          }
+          return false
+        })
+        const until = Date.now()
+        subagents = rollupSubagents(history.turns, descendants, info.time.created, until)
+        // The ones on this same engine: counter-difference engines see their
+        // requests in this turn's window, so the check expects them too.
+        sameEngine = rollupSubagents(
+          history.turns.filter((t) => t.provider === provider),
+          descendants,
+          info.time.created,
+          until
+        )
+      } catch (e: unknown) {
+        dbg(`sub-agent lookup threw: ${String(e)}`)
+      }
+
+      const tier2: { pendingBaseline: boolean; sharedWindow: boolean; engine?: TurnRecord["engine"] } = {
+        pendingBaseline: false,
+        sharedWindow: false,
+      }
+      let line: TurnView | null = null
+      try {
+        line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -605,9 +776,8 @@ export default Plugin.define({
       }
       const enriched = line !== null
       if (!line) {
-        line = universalLine(
+        line = universalView(
           provider,
-          model,
           info,
           turn,
           cfg.display,
@@ -616,10 +786,12 @@ export default Plugin.define({
         // Say why this turn looks different from the next one. The figures
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
-        // magnitude when it does.
-        if (tier2.pendingBaseline) line += "\nengine telemetry from the next turn"
-        else if (tier2.sharedWindow) line += "\nengine data skipped: overlapping requests"
+        // magnitude when it does. Split to fit the box's 32 cells.
+        if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
+        else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
       }
+
+      if (subagents) line.rows.push(...subagentRows(subagents))
 
       // Keep the turn for the drill-down. Every figure below is OpenCode's own,
       // whatever tier drew the sidebar line; `source` records only which tier
@@ -643,6 +815,13 @@ export default Plugin.define({
         source: enriched ? "engine" : "host",
         // Host-derived like every figure in this row; see TurnRecord.ttftSource.
         ttftSource: "host",
+        promptTokens: turn?.promptTokens,
+        streamS: turn?.streamMs ? turn.streamMs / 1000 : undefined,
+        waitS: turn?.waitMs !== undefined ? turn.waitMs / 1000 : undefined,
+        retries: turn?.retries,
+        steps: turn?.steps,
+        engine: enriched ? tier2.engine : undefined,
+        subagents,
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns
@@ -665,7 +844,7 @@ export default Plugin.define({
         dbg(`report ${seq} for ${sessionID} superseded, not rendering`)
         return
       }
-      show(line, sessionID, key)
+      show(encodeView(line), sessionID, key)
     }
 
     // ---- subscriptions ------------------------------------------------------
@@ -702,6 +881,10 @@ export default Plugin.define({
             stepModel.set(id, d.model.id)
             bound(stepModel)
           }
+          // A new attempt at the step: any read from an earlier attempt is not
+          // this attempt's, and would block the new read (readStep keeps the
+          // first read per step).
+          stepReads.delete(id)
           const t = turnFor(id)
           t.firstAt = undefined
           t.lastAt = undefined
@@ -714,32 +897,55 @@ export default Plugin.define({
           if (typeof sid === "string") execStart.set(sid, Date.now())
         })
       )
+      // Read engines that keep only their latest request when a step's
+      // streaming ends. Not at step.ended: for a step that calls tools, that
+      // fires only after the tools have run, so a tool using the same engine
+      // -- a sub-agent, measured -- has replaced `latest` by then (step.ended
+      // read 163 tok, the sub-agent's; step.streamed read 194, the step's
+      // own). At step.streamed the engine already held the step on all five
+      // steps measured. step.ended stays as a fallback for a step whose
+      // stream event never arrived.
+      const readStep = (id: string, moment: string): void => {
+        if (stepReads.has(id)) return
+        const provider = stepProvider.get(id)
+        const http: HttpOptions = { signal: life.signal }
+        let read: Promise<unknown> | undefined
+        if (provider === "mtplx") {
+          const r = fetchMtplxLatest(cfg.mtplxUrl, http).catch(() => null)
+          r.then((l) => dbg(`  mtplx receipt at ${moment}: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
+          read = r
+        } else if (provider === "koboldcpp" || provider === "kobold") {
+          const r = fetchKoboldPerf(cfg.koboldBase, http).catch(() => null)
+          r.then((p) => dbg(`  koboldcpp receipt at ${moment}: ${p?.last_token_count ?? "none"} tok`)).catch(() => {})
+          read = r
+        } else if (provider === "mlxserve" || provider === "mlx-serve") {
+          const r = fetchMlxServeRequests(cfg.mlxServeBase, stepModel.get(id), cfg.mlxServeKey || undefined, http).catch(
+            () => null
+          )
+          r.then((recs) => dbg(`  mlxserve receipt at ${moment}: ${recs?.[0]?.completionTokens ?? "none"} tok`)).catch(
+            () => {}
+          )
+          read = r
+        }
+        if (read) {
+          stepReads.set(id, read)
+          bound(stepReads)
+        }
+      }
+      const stepID = (evt: unknown): string | undefined => {
+        const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
+        return typeof id === "string" ? id : undefined
+      }
+      off.push(
+        ctx.data.on("session.step.streamed", (evt) => {
+          const id = stepID(evt)
+          if (id) readStep(id, "step.streamed")
+        })
+      )
       off.push(
         ctx.data.on("session.step.ended", (evt) => {
-          const id = (evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID
-          if (typeof id !== "string") return
-          const provider = stepProvider.get(id)
-          const http: HttpOptions = { signal: life.signal }
-          let read: Promise<unknown> | undefined
-          if (provider === "mtplx") {
-            const r = fetchMtplxLatest(cfg.mtplxUrl, http).catch(() => null)
-            r.then((l) => dbg(`  mtplx receipt at step.ended: ${l?.completion_tokens ?? "none"} tok`)).catch(() => {})
-            read = r
-          } else if (provider === "koboldcpp" || provider === "kobold") {
-            const r = fetchKoboldPerf(cfg.koboldBase, http).catch(() => null)
-            r.then((p) => dbg(`  koboldcpp receipt at step.ended: ${p?.last_token_count ?? "none"} tok`)).catch(() => {})
-            read = r
-          } else if (provider === "mlxserve" || provider === "mlx-serve") {
-            const r = fetchMlxServeRequests(cfg.mlxServeBase, stepModel.get(id), cfg.mlxServeKey || undefined, http).catch(
-              () => null
-            )
-            r.then((recs) => dbg(`  mlxserve receipt at step.ended: ${recs?.[0]?.completionTokens ?? "none"} tok`)).catch(() => {})
-            read = r
-          }
-          if (read) {
-            stepReads.set(id, read)
-            bound(stepReads)
-          }
+          const id = stepID(evt)
+          if (id) readStep(id, "step.ended (fallback)")
         })
       )
       off.push(ctx.data.on("session.text.delta", mark))
@@ -756,6 +962,22 @@ export default Plugin.define({
         off.push(
           ctx.data.on("session.execution.started", (evt) => {
             dbg(`event execution.started ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.step.streamed", (evt) => {
+            dbg(`event step.streamed ${(evt as { data?: { assistantMessageID?: string } }).data?.assistantMessageID ?? "?"}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.created", (evt) => {
+            const d = (evt as { data?: { sessionID?: string; parentID?: string } }).data
+            dbg(`event session.created ${d?.sessionID ?? "?"}${d?.parentID ? ` parent ${d.parentID}` : ""}`)
+          })
+        )
+        off.push(
+          ctx.data.on("session.execution.succeeded", (evt) => {
+            dbg(`event execution.succeeded ${(evt as { data?: { sessionID?: string } }).data?.sessionID ?? "?"}`)
           })
         )
         off.push(
@@ -889,12 +1111,23 @@ export default Plugin.define({
             // highlight) instead of just toggling. This is a footer we
             // render, not a passage a user would want to copy, so turning
             // selection off is the right default rather than a workaround.
+            // Two independent boxes, each opened and closed by its heading:
+            // the last turn, and the session. Laid out as labelled rows, one
+            // figure per line, inside a 1-cell margin and 1-cell / 1-row
+            // padding on the theme's offset shade -- so they read as this
+            // plugin's own blocks, not as more lines of OpenCode's sidebar.
+            // The heading names the engine only: the model is already shown
+            // under the prompt box.
+            const stored = lineFor(panel, input.sessionID)
+            const turnView: TurnView =
+              stored === PLACEHOLDER ? { engine: "last turn", rows: [], notes: ["no turn yet"] } : decodeView(stored)
+            const suffix = stored === PLACEHOLDER ? "" : " · last turn"
+            const summary = summariseSession(history.turns, input.sessionID)
             return (
-              <text selectable={false} onMouseDown={() => toggleCollapsed()}>
-                {ui.collapsed
-                  ? formatCollapsedLine(latestFor(history.turns, input.sessionID), input.sessionID)
-                  : lineFor(panel, input.sessionID)}
-              </text>
+              <box flexDirection="column">
+                {drawBox(turnView, suffix, !ui.collapsed, toggleCollapsed, true)}
+                {summary ? drawBox(sessionView(summary), "", ui.sessionOpen === true, toggleSession, false) : null}
+              </box>
             )
           },
         })
@@ -911,7 +1144,11 @@ export default Plugin.define({
         ctx.ui.slot({
           append: "session.panel",
           render: (input) =>
-            input.name === PANEL_NAME ? <text>{formatHistory(history.turns)}</text> : null,
+            // One text, wrapped by the host. A line per row with
+            // wrapMode="none" and truncate was tried (OpenCode 2.0.12): it
+            // cut rows in the middle with "..." and left stale cells from
+            // earlier frames on resize, so rows read as garbage.
+            input.name === PANEL_NAME ? <text>{historyLines(history.turns).join("\n")}</text> : null,
         })
       )
     } catch (e: unknown) {

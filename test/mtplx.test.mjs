@@ -27,7 +27,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { formatMtplxLine, combineMtplxSteps } from "../adapters/mtplx.ts"
+import { formatMtplxLine, combineMtplxSteps, mtplxView } from "../adapters/mtplx.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const fixture = (name) => JSON.parse(readFileSync(path.join(dir, "..", "fixtures", name), "utf8"))
@@ -55,16 +55,18 @@ test("a completed turn's completion_tokens matches the response's own usage", ()
   assert.equal(completed.latest.completion_tokens, usage.completion_tokens)
 })
 
-test("a completed turn renders all five lines from the live receipt", () => {
-  const out = formatMtplxLine(completed.latest, MODEL).split("\n")
-  assert.equal(out.length, 5, out.join(" | "))
-  assert.ok(out[0].startsWith("MTPLX  "))
-  // The ttft beside the rate is what reconciles it with OpenCode's own
-  // whole-turn figure; the rate itself carries no qualifier.
-  assert.ok(/^\d+\.\d tok\/s {2}ttft \d\.\d{2}s$/.test(out[1]), out[1])
-  assert.ok(/^prefill \d+ tok\/s$/.test(out[2]), out[2])
-  assert.ok(out[3].startsWith(`${completed.latest.completion_tokens} tok`))
-  assert.ok(/^MTP \d+\.\d{2}x( \d+(\/\d+)*%)?$/.test(out[4]), out[4])
+test("a completed turn renders a row per figure from the live receipt", () => {
+  const v = mtplxView(completed.latest)
+  assert.equal(v.engine, "MTPLX", "the heading names the engine, not the model")
+  const rows = Object.fromEntries(v.rows)
+  // The rate carries no qualifier; the ttft beside it explains the rest.
+  assert.ok(/^\d+\.\d tok\/s$/.test(rows.speed), rows.speed)
+  assert.ok(/^\d\.\d{2}s$/.test(rows.ttft), rows.ttft)
+  assert.ok(/^\d+ tok\/s$/.test(rows.prefill), rows.prefill)
+  assert.equal(rows.tokens, String(completed.latest.completion_tokens))
+  assert.ok(/^\d+\.\d{2}x$/.test(rows.MTP), rows.MTP)
+  assert.ok(/^\d+(\/\d+)*%$/.test(rows.accepted), rows.accepted)
+  assert.equal(v.key, rows.speed, "collapsed, the heading keeps the speed")
 })
 
 test("completion_tokens already includes reasoning — no separate think subset is claimed", () => {
@@ -72,7 +74,7 @@ test("completion_tokens already includes reasoning — no separate think subset 
   // field carrying that split, so the topline is the bare total, matching
   // what tokensLabel(total, 0) would render — never a fabricated "(N think)".
   const out = formatMtplxLine(completed.latest, MODEL)
-  assert.ok(out.includes(`${completed.latest.completion_tokens} tok`), out)
+  assert.ok(out.includes(`tokens ${completed.latest.completion_tokens}`), out)
   assert.ok(!out.includes("think"), "no think breakdown is available from /metrics")
 })
 
@@ -92,10 +94,11 @@ test("an interrupted turn omits the missing figures instead of printing ?", () =
 })
 
 test("an interrupted turn still shows decode rate, tokens and elapsed time", () => {
-  const out = formatMtplxLine(interrupted.latest, MODEL).split("\n")
+  const rows = Object.fromEntries(mtplxView(interrupted.latest).rows)
   const l = interrupted.latest
-  assert.ok(out[1].startsWith(`${l.decode_tok_s.toFixed(1)} tok/s`))
-  assert.ok(out.some((line) => line.startsWith(`${l.completion_tokens} tok`)))
+  assert.equal(rows.speed, `${l.decode_tok_s.toFixed(1)} tok/s`)
+  assert.equal(rows.tokens, String(l.completion_tokens))
+  assert.ok(rows.time, "elapsed time survives the interruption")
 })
 
 test("no verify_calls on the interrupted turn means no MTP line", () => {
@@ -121,9 +124,10 @@ test("no verify passes means no MTP line, not a division by zero", () => {
 })
 
 test("an empty receipt renders the header alone, with no holes", () => {
-  const out = formatMtplxLine({}, MODEL)
-  assert.equal(out, "MTPLX  arsis-dev-ukisai-swift-…")
-  assert.ok(!out.includes("?"))
+  const v = mtplxView({})
+  assert.equal(v.rows.length, 0)
+  assert.equal(formatMtplxLine({}, MODEL), "MTPLX")
+  assert.equal(v.key, undefined)
 })
 
 test("NaN is treated as absent, not rendered", () => {
@@ -202,7 +206,9 @@ test("the total shown is OpenCode's -- what you waited -- with retries named", (
   // step and the tool time between them, which only the host has.
   const c = combineMtplxSteps([{ receipt: stepA, hostTokens: 64 }, { receipt: stepB, hostTokens: 138 }])
   const out = formatMtplxLine(c, MODEL, { total: 7.0, retries: 2 })
-  assert.ok(out.includes("202 tok  7.00s (2 retries)"), out)
+  const v = mtplxView(c, { total: 7.0, retries: 2 })
+  assert.deepEqual(v.rows.filter(([l]) => l === "tokens" || l === "time" || l === ""),
+    [["tokens", "202"], ["time", "7.00s"], ["", "2 retries"]])
   assert.ok(!out.includes("4.48"), out)
 })
 

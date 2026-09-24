@@ -22,7 +22,8 @@
 // against, which is the gap that hid two earlier bugs.
 
 import { httpJson, type HttpOptions } from "../http"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
 
 /** Cumulative counters as this plugin reads them. */
 export interface OmlxSample {
@@ -110,24 +111,28 @@ export function omlxIsThisTurn(
  * yields only the server's all-time average, which is not this turn's speed.
  * `host.total` is the turn's total from OpenCode, retries included.
  */
-export function formatOmlxLine(
+export function omlxView(
   now: OmlxSample,
   prev: OmlxSample | undefined,
   hostTtft?: number,
-  host: { decodeTokS?: number; total?: number; retries?: number } = {}
-): string {
-  const header = `oMLX  ${short(now.model ?? "")}`
-  // Host-derived, and labelled as such. No derived figure on this line takes
-  // its numerator from one source and its denominator from the other -- ttft
-  // is measured directly, so nothing crosses the seam.
-  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
+  host: { decodeTokS?: number; total?: number; retries?: number; includesSubagents?: boolean } = {}
+): TurnView {
+  // Host-derived, and labelled as such. No derived figure here takes its
+  // numerator from one source and its denominator from the other -- ttft is
+  // measured directly, so nothing crosses the seam.
+  const ttft = rowsOf("ttft", [hostTtft !== undefined ? `${nn(hostTtft, 2)}s (host)` : ""])
 
   if (!prev || prev.model !== now.model || now.requests <= prev.requests) {
-    return [
-      header,
-      `${nn(now.avgGen)} tok/s (server avg)${ttftLabel}`,
-      `prefill ${ni(now.avgPrefill)} tok/s (avg)`,
-    ].join("\n")
+    return {
+      engine: "oMLX",
+      rows: [
+        ...rowsOf("speed", [`${nn(now.avgGen)} tok/s`, "(server avg)"]),
+        ...ttft,
+        ...rowsOf("prefill", [`${ni(now.avgPrefill)} tok/s (avg)`]),
+      ],
+      notes: [],
+      key: `${nn(now.avgGen)} tok/s avg`,
+    }
   }
 
   // More than one request landed in the window (an agentic turn issuing
@@ -155,16 +160,30 @@ export function formatOmlxLine(
   const promptTokens = now.prompt - prev.prompt
   const cached = now.cached - prev.cached
 
-  return [
-    header,
-    `${nn(decode)} tok/s${decodeLabel}${ttftLabel}`,
-    `prefill ${ni(prefill)} tok/s${prefillLabel}`,
-    `${ni(completion)} tok  (${ni(promptTokens)} prompt${cached > 0 ? `, ${ni(cached)} cached` : ""})${
-      host.total !== undefined ? `  ${nn(host.total, 2)}s` : ""
-    }${
-      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }`,
-  ].join("\n")
+  return {
+    engine: "oMLX",
+    rows: [
+      ["speed", `${nn(decode)} tok/s${decodeLabel}`],
+      ...ttft,
+      ["prefill", `${ni(prefill)} tok/s${prefillLabel}`],
+      ...rowsOf("tokens", [nt(completion), host.includesSubagents ? "incl. sub-agents" : ""]),
+      ...timeRows(host.total, host.retries),
+      ["prompt", nt(promptTokens)],
+      ...rowsOf("cached", [cached > 0 ? nt(cached) : ""]),
+    ],
+    notes: [],
+    key: `${nn(decode)} tok/s${decodeLabel}`,
+  }
+}
+
+/** The view as text; kept for tests that look for a figure. */
+export function formatOmlxLine(
+  now: OmlxSample,
+  prev: OmlxSample | undefined,
+  hostTtft?: number,
+  host: { decodeTokS?: number; total?: number; retries?: number; includesSubagents?: boolean } = {}
+): string {
+  return viewText(omlxView(now, prev, hostTtft, host))
 }
 
 export async function fetchOmlxSample(

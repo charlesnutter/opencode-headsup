@@ -179,7 +179,7 @@ test("mlx-serve: renders a note when several records were summed into one turn",
   const t = mlxServeTurn(recs, oldest)
   const out = formatMlxServeLine(t, "qwen05")
   assert.ok(out.includes("2 requests this turn"), out)
-  assert.ok(out.includes("194 tok"), out)
+  assert.ok(out.includes("tokens 194"), out)
 })
 
 test("mlx-serve: a normal single-record turn carries no such note", () => {
@@ -224,7 +224,7 @@ test("mlx-serve steps: every request accounted for, so no 'requests this turn' n
   const t = combineMlxServeSteps([{ records: afterStep1, hostTokens: 100 }, { records: afterStep2, hostTokens: 94 }])
   const out = formatMlxServeLine(t, "qwen05", { total: 12.0, retries: 1 })
   assert.ok(!out.includes("requests this turn"), out)
-  assert.ok(out.includes("194 tok  12.00s (1 retry)"), out)
+  assert.ok(out.includes("tokens 194\ntime 12.00s\n1 retry"), out)
 })
 
 console.log(`\n${passed} passed`)

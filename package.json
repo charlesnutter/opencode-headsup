@@ -25,7 +25,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && bun test/format.test.mjs && bun test/http.test.mjs && bun test/prometheus-text.test.mjs && bun test/universal.test.mjs && bun test/mtplx.test.mjs && bun test/omlx.test.mjs && bun test/llamacpp.test.mjs && bun test/prometheus.test.mjs && bun test/koboldcpp.test.mjs && bun test/splash.test.mjs && bun test/mlxserve.test.mjs && bun test/history.test.mjs && bun test/panels.test.mjs && bun test/references.test.mjs"
+    "test": "npm run typecheck && bun test/format.test.mjs && bun test/http.test.mjs && bun test/prometheus-text.test.mjs && bun test/universal.test.mjs && bun test/mtplx.test.mjs && bun test/omlx.test.mjs && bun test/llamacpp.test.mjs && bun test/prometheus.test.mjs && bun test/koboldcpp.test.mjs && bun test/splash.test.mjs && bun test/mlxserve.test.mjs && bun test/history.test.mjs && bun test/panels.test.mjs && bun test/session.test.mjs && bun test/rows.test.mjs && bun test/references.test.mjs"
   },
   "files": [
     "tui.tsx",
@@ -35,6 +35,8 @@
     "universal.ts",
     "history.ts",
     "panels.ts",
+    "session.ts",
+    "rows.ts",
     "adapters/",
     "README.md",
     "LICENSE"

@@ -10,12 +10,23 @@ the provider.
 
 
 ```
-MTPLX  arsis-dev-ukisai-swift-…
-38.1 tok/s  ttft 9.06s
-prefill 452 tok/s
-37 tok  10.03s
-MTP 3.70x 99/96/80%
+▾ MTPLX · last turn
+
+speed       34.4 tok/s
+ttft        17.19s
+prefill     460 tok/s
+tokens      1,233
+time        207.37s
+MTP         3.42x
+accepted    91/79/64%
+sub-agent   191 tok
+            23.91s
+
+▸ Session · 14 turns  48.2 tok/s
 ```
+
+Two boxes, each opened and closed by clicking its heading: the last turn,
+and the session so far.
 
 Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
 (OpenCode 1.18.x), see
@@ -70,7 +81,7 @@ Collapsed, the line keeps one figure rather than becoming a bare label:
 
 ## Configuration
 
-One key, because one figure is genuinely a preference. Everything else
+Two keys, because two things are genuinely preferences. Everything else
 appears exactly when its underlying data exists and stays silent when it
 does not — there is nothing to choose.
 
@@ -79,7 +90,7 @@ does not — there is nothing to choose.
   "plugins": [
     {
       "package": "@banburist/opencode-headsup",
-      "options": { "showContext": false }
+      "options": { "showContext": false, "background": true }
     }
   ]
 }
@@ -91,6 +102,12 @@ Adds a `13% prompt/limit` line, computed as
 `tokens.input / ModelInfo.limit.context` based on the model's
 config in `opencode.json`. Labeled as `prompt/limit` rather than
 `context used`.
+
+**background** (default `true`)
+
+Puts your theme's offset panel shade behind each box. Turn it off for a
+theme or terminal with a transparent background, where the shade can
+disappear.
 
 ### Endpoints
 

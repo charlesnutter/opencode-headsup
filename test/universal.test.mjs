@@ -8,7 +8,7 @@
 // counts never disagreed — only the rate's numerator did.
 // Run with: bun test/universal.test.mjs
 import { strict as assert } from "node:assert"
-import { turnRate, universalLine, turnSteps, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
+import { turnRate, universalLine, universalView, turnSteps, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -52,11 +52,11 @@ test("universalLine reports the engine's rate, not the visible-only one", () => 
 test("the totals line is the topline total with thinking as a subset", () => {
   const line = universalLine("splash", "incoai/Qwen3.8-27B-Splash", splashInfo, splashTurn)
   // Topline is everything decoded, matching the engine's own `output 1,247`.
-  assert.ok(line.includes("1247 tok (889 think)"), line)
+  assert.ok(line.includes("tokens 1,247\n889 thinking"), line)
   // Never the additive form: `(+889 think)` invites summing to 2136.
   assert.ok(!line.includes("(+"), line)
   // And never the old visible-only topline.
-  assert.ok(!line.includes("358 tok"), line)
+  assert.ok(!line.includes("tokens 358"), line)
   assert.ok(line.includes("ttft 0.66s"), line)
 })
 
@@ -113,7 +113,7 @@ test("with no stream marks at all there is no rate, and nothing says overall", (
   assert.equal(r.decodeTokS, undefined)
   const line = universalLine("mtplx", "m", info, undefined)
   assert.ok(!line.includes("tok/s"), line)
-  assert.ok(line.includes("37 tok  10.03s"), line)
+  assert.ok(line.includes("tokens 37\ntime 10.03s"), line)
 })
 
 test("ttft falls back to the message's created, not only turn.startAt", () => {
@@ -139,7 +139,7 @@ const metered = {
 test("a metered turn shows this turn's cost and its cache reuse", () => {
   const out = universalLine("opencode-go", "mimo-v2.6-flash", metered, { firstAt: 1500, lastAt: 2662 })
   assert.ok(out.includes("$0.0006"), out)
-  assert.ok(out.includes("2048 cached"), out)
+  assert.ok(out.includes("cached 2,048"), out)
 })
 
 test("a free model shows no cost line rather than $0.00", () => {
@@ -147,7 +147,7 @@ test("a free model shows no cost line rather than $0.00", () => {
   const out = universalLine("mtplx", "local", free, { firstAt: 1500, lastAt: 2662 })
   assert.ok(!out.includes("$"), out)
   // the cache figure is independent and survives
-  assert.ok(out.includes("2048 cached"), out)
+  assert.ok(out.includes("cached 2,048"), out)
 })
 
 test("a cold prompt shows no cache line rather than 0 cached", () => {
@@ -157,11 +157,12 @@ test("a cold prompt shows no cache line rather than 0 cached", () => {
   assert.ok(out.includes("$0.0006"), "cost is independent and survives")
 })
 
-test("with neither, the line is exactly the three it always was", () => {
+test("with neither, the rows are exactly speed, ttft, tokens and time", () => {
   const bare = { time: { created: 1000, completed: 2662 },
     tokens: { input: 10, output: 11, reasoning: 0, cache: { read: 0, write: 0 } } }
-  const out = universalLine("mtplx", "m", bare, { firstAt: 1500, lastAt: 2662 })
-  assert.equal(out.split("\n").length, 3, out)
+  const v = universalView("mtplx", bare, { firstAt: 1500, lastAt: 2662 })
+  assert.deepEqual(v.rows.map(([l]) => l), ["speed", "ttft", "tokens", "time"])
+  assert.equal(v.engine, "mtplx", "the heading names the provider, not the model")
 })
 
 test("the per-turn cost is used, never a running session total", () => {
@@ -265,7 +266,7 @@ test("the turn spans the first step's start to the last step's end", () => {
   assert.equal(info.time.completed - info.time.created, 37_130)
   const line = universalLine("vllmmlx", "m", info, aggregateTurn(turnSteps(toolTurn), marks).turn)
   assert.ok(line.includes("37.13s"), line)
-  assert.ok(line.includes("316 tok"), line)
+  assert.ok(line.includes("tokens 316"), line)
 })
 
 test("ttft is the first step's, not the last step's", () => {
@@ -323,14 +324,14 @@ test("retries are counted per step and shown beside the total", () => {
   const { info, turn } = aggregateTurn(turnSteps(toolTurn), retried, { execStart: T0 - 23_000 })
   assert.equal(turn.retries, 6)
   const line = universalLine("vllmmlx", "m", info, turn)
-  assert.ok(line.includes("60.13s (6 retries)"), line)
+  assert.ok(line.includes("time 60.13s\n6 retries"), line)
 })
 
 test("one retry is singular, and none says nothing", () => {
   const once = new Map(marks)
   once.set("a2", { ...marks.get("a2"), attempts: 2 })
   const r1 = aggregateTurn(turnSteps(toolTurn), once)
-  assert.ok(universalLine("x", "m", r1.info, r1.turn).includes("(1 retry)"))
+  assert.ok(universalLine("x", "m", r1.info, r1.turn).includes("\n1 retry"))
   const r0 = aggregateTurn(turnSteps(toolTurn), marks)
   assert.ok(!universalLine("x", "m", r0.info, r0.turn).includes("retr"))
 })
@@ -341,6 +342,26 @@ test("a one-step turn aggregates to exactly that step", () => {
   assert.equal(info.tokens.output + info.tokens.reasoning, 140)
   assert.equal(info.time.completed - info.time.created, 10_200)
   assert.ok(Math.abs(turnRate(140, info, turn).decodeTokS - 140 / 3.13) < 0.01)
+})
+
+// ---- what the Session section adds up ----------------------------------------
+test("the turn records time spent waiting for each step's first token", () => {
+  // a1: created T0, first token T0+7.4s; a2: T0+14s -> T0+20s; a3: T0+26.93s -> T0+34s.
+  const { turn } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.equal(turn.waitMs, 7_400 + 6_000 + 7_070)
+})
+
+test("the turn records the prompt tokens of every step, not just the last", () => {
+  // The last step's input is the context the turn ended at (info.tokens.input);
+  // a cache hit rate needs every step's prompt, since each step read one.
+  const { turn } = aggregateTurn(turnSteps(toolTurn), marks)
+  assert.equal(turn.promptTokens, 7000 + 7200 + 7500)
+})
+
+test("a step with no first token contributes no waiting time and marks it incomplete", () => {
+  const partial = new Map([...marks].filter(([k]) => k !== "a2"))
+  const { turn } = aggregateTurn(turnSteps(toolTurn), partial)
+  assert.equal(turn.waitMs, undefined)
 })
 
 console.log(`\n${passed} passed`)

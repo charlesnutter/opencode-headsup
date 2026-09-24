@@ -1,0 +1,252 @@
+// Validates session.ts -- the collapsible Session section's figures.
+//
+// Everything here is an aggregate over one session's history rows. The rules
+// it must hold are the per-turn rules, applied across turns: tok/s is
+// generation only (tokens over streaming time), averages never mix two
+// models, and an engine-only figure is averaged only over turns that had it.
+// Run with: bun test/session.test.mjs
+import { strict as assert } from "node:assert"
+import { summariseSession, sessionView, sparkline, rollupSubagents, subagentRows } from "../session.ts"
+
+let passed = 0
+function test(name, fn) {
+  try {
+    fn()
+    passed++
+    console.log("  ok ", name)
+  } catch (e) {
+    console.log("  FAIL", name, "\n      ", e.message)
+    process.exitCode = 1
+  }
+}
+
+const SID = "ses_a"
+// History is newest first, as `record` keeps it.
+const row = (over = {}) => ({
+  at: 0,
+  provider: "mtplx",
+  model: "qwen",
+  sessionID: SID,
+  tokens: 100,
+  rate: 50,
+  rateWindow: "decode",
+  ttft: 1.0,
+  totalS: 10,
+  streamS: 2,
+  waitS: 1,
+  promptTokens: 200,
+  cached: 800,
+  source: "host",
+  ...over,
+})
+
+test("only this session's turns are counted", () => {
+  const s = summariseSession([row(), row({ sessionID: "ses_b" }), row()], SID)
+  assert.equal(s.turns, 2)
+  assert.equal(summariseSession([row({ sessionID: "ses_b" })], SID), undefined)
+})
+
+test("generation tok/s is total tokens over total streaming time", () => {
+  // 100 tok / 2s and 300 tok / 3s -> 400 / 5 = 80, not the mean of 50 and 100.
+  const s = summariseSession([row({ tokens: 300, streamS: 3 }), row({ tokens: 100, streamS: 2 })], SID)
+  assert.equal(s.genTokS, 80)
+})
+
+test("an older row without streaming time contributes through its decode rate", () => {
+  // Rows recorded before streamS existed: tokens / rate is their stream time.
+  const s = summariseSession([row({ streamS: undefined, tokens: 100, rate: 50 })], SID)
+  assert.equal(s.genTokS, 50)
+})
+
+test("a whole-turn rate from an older row is never counted as generation", () => {
+  const s = summariseSession([row({ streamS: undefined, rateWindow: "whole", rate: 3.7 })], SID)
+  assert.equal(s.genTokS, undefined)
+})
+
+test("the trend is recent turns' generation rates, oldest first, at most eight", () => {
+  const rows = Array.from({ length: 10 }, (_, i) => row({ rate: 10 + i, streamS: undefined }))
+  // newest first: rate 10 is newest, so oldest-first reads 17..10 for the last 8
+  const s = summariseSession(rows, SID)
+  const want = [17, 16, 15, 14, 13, 12, 11, 10]
+  assert.equal(s.trend.length, want.length)
+  s.trend.forEach((v, i) => assert.ok(Math.abs(v - want[i]) < 1e-9, `${v} vs ${want[i]}`))
+})
+
+test("ttft is the median and the worst, not a mean a cold first turn drags up", () => {
+  const s = summariseSession([row({ ttft: 0.5 }), row({ ttft: 0.7 }), row({ ttft: 17.6 })], SID)
+  assert.equal(s.ttftMedian, 0.7)
+  assert.equal(s.ttftMax, 17.6)
+})
+
+test("cache hit is cached over all prompt tokens, across turns", () => {
+  // (800 + 100) cached of (200+800 + 900+100) prompt = 900 / 2000.
+  const s = summariseSession([row(), row({ cached: 100, promptTokens: 900 })], SID)
+  assert.equal(s.cacheHit, 900 / 2000)
+})
+
+test("the time split is generating, waiting, and everything else", () => {
+  // 20s total: 4s streaming, 2s waiting, 14s other (tools, retries, overhead).
+  const s = summariseSession([row(), row()], SID)
+  assert.equal(s.time.generating, 4 / 20)
+  assert.equal(s.time.waiting, 2 / 20)
+  assert.equal(s.time.other, 14 / 20)
+})
+
+test("averages never mix models: only the current model's turns count", () => {
+  const s = summariseSession([row({ model: "b", rate: 200, tokens: 200, streamS: 1 }), row(), row()], SID)
+  assert.equal(s.turns, 1)
+  assert.equal(s.totalTurns, 3)
+  assert.equal(s.model, "b")
+  assert.equal(s.genTokS, 200)
+})
+
+test("engine-only figures average over the turns that have them", () => {
+  const s = summariseSession(
+    [row({ engine: { mtpX: 3.0, prefillTokS: 400 } }), row(), row({ engine: { mtpX: 4.0, prefillTokS: 500 } })],
+    SID
+  )
+  assert.equal(s.engine.mtpX, 3.5)
+  assert.equal(s.engine.prefillTokS, 450)
+  assert.equal(s.engine.draftAccept, undefined)
+})
+
+test("retries are summed", () => {
+  assert.equal(summariseSession([row({ retries: 2 }), row({ retries: 1 }), row()], SID).retries, 3)
+})
+
+// Row values in the mockup: one figure per line, a value with parts
+// continuing under an empty label, every row within the box's 32 cells.
+const rowsOfView = (s) => sessionView(s).rows
+const labelled = (s) => Object.fromEntries(rowsOfView(s).filter(([l]) => l))
+const continuation = (s, label) => {
+  const rows = rowsOfView(s)
+  const i = rows.findIndex(([l]) => l === label)
+  const out = [rows[i][1]]
+  for (let j = i + 1; j < rows.length && rows[j][0] === ""; j++) out.push(rows[j][1])
+  return out
+}
+
+test("the heading names the session, and collapsed it keeps the average speed", () => {
+  const v = sessionView(summariseSession([row(), row()], SID))
+  assert.equal(v.engine, "Session · 2 turns")
+  assert.equal(v.key, "50.0 tok/s")
+})
+
+test("a heading says which turns count when the model changed", () => {
+  const v = sessionView(summariseSession([row({ model: "b" }), row(), row()], SID))
+  assert.equal(v.engine, "Session · b · 1/3")
+})
+
+test("one turn is singular", () => {
+  assert.equal(sessionView(summariseSession([row()], SID)).engine, "Session · 1 turn")
+})
+
+test("every row fits the box's 32 cells", () => {
+  const s = summariseSession(
+    [row({ ttft: 0.5, retries: 2, engine: { mtpX: 3.4, prefillTokS: 449, draftAccept: 0.7 },
+      subagents: { count: 2, tokens: 12345, spanS: 30, cost: 0.012 } }), row({ ttft: 17.6 })],
+    SID
+  )
+  rowsOfView(s).forEach(([l, v]) => assert.ok(12 + v.length <= 32, `${l}: ${v}`))
+})
+
+test("rows are label/value pairs, and an absent figure leaves no row", () => {
+  const s = summariseSession([row({ ttft: undefined, cached: undefined, promptTokens: undefined })], SID)
+  const labels = rowsOfView(s).map(([l]) => l)
+  assert.ok(!labels.includes("ttft"), labels.join(","))
+  assert.ok(!labels.includes("cache"), labels.join(","))
+  assert.ok(labels.includes("speed"))
+})
+
+test("rows read as aggregates: avg, median, max, %", () => {
+  const s = summariseSession(
+    [row({ ttft: 0.5, retries: 2, engine: { mtpX: 3.4, prefillTokS: 449 } }), row({ ttft: 17.6 })],
+    SID
+  )
+  const rows = labelled(s)
+  assert.equal(rows.speed, "50.0 tok/s avg")
+  assert.deepEqual(continuation(s, "ttft"), ["9.05s median", "17.60s max"])
+  assert.equal(rows.cache, "80% hit")
+  assert.deepEqual(continuation(s, "time"), ["20% generating", "10% waiting", "70% other"])
+  assert.equal(rows.MTP, "3.40x avg")
+  assert.equal(rows.prefill, "449 tok/s avg")
+  assert.equal(rows.retries, "2")
+})
+
+test("the sparkline scales between the lowest and highest rate", () => {
+  assert.equal(sparkline([10, 20, 30]), "▁▅█")
+  assert.equal(sparkline([5, 5]), "▄▄", "a flat trend sits mid-height")
+  assert.equal(sparkline([7]), "", "one point is not a trend")
+})
+
+// ---- sub-agents ---------------------------------------------------------------
+// A sub-agent runs in its own child session, so its turns are recorded under
+// that session, not the parent's (measured: the parent's family listed the
+// child with 1 history row when the parent's turn ended, 11s after the child
+// finished). The roll-up adds up the child rows that finished during the
+// parent's turn.
+const child = (over = {}) => row({ sessionID: "ses_child", at: 20_000, totalS: 25, tokens: 228, cost: 0.004, ...over })
+
+test("sub-agent rows that finished during the turn are rolled up", () => {
+  const r = rollupSubagents([child(), child({ sessionID: "ses_other_child", tokens: 100, at: 30_000, totalS: 5 })],
+    ["ses_child", "ses_other_child"], 0, 40_000)
+  assert.equal(r.count, 2)
+  assert.equal(r.tokens, 328)
+  assert.ok(Math.abs(r.cost - 0.004 * 2) < 1e-12)
+})
+
+test("a sub-agent row from an earlier turn is not this turn's", () => {
+  assert.equal(rollupSubagents([child({ at: 5_000 })], ["ses_child"], 10_000, 40_000), undefined)
+})
+
+test("rows of sessions that are not this session's sub-agents are ignored", () => {
+  assert.equal(rollupSubagents([child()], ["ses_somebody_else"], 0, 40_000), undefined)
+})
+
+test("sub-agent time is the span they ran, not a sum -- they can run in parallel", () => {
+  // Two 10s sub-agents side by side, both finishing at 20s: 10s of wall time, not 20.
+  const r = rollupSubagents(
+    [child({ at: 20_000, totalS: 10 }), child({ sessionID: "ses_b", at: 20_000, totalS: 10 })],
+    ["ses_child", "ses_b"], 0, 40_000)
+  assert.equal(r.spanS, 10)
+})
+
+test("the per-turn line sums tokens, time and cost but never a rate", () => {
+  const r = rollupSubagents([child()], ["ses_child"], 0, 40_000)
+  assert.deepEqual(subagentRows(r), [["sub-agent", "228 tok"], ["", "25.00s"], ["", "$0.0040"]])
+  assert.ok(!subagentRows(r).some(([, v]) => v.includes("tok/s")))
+})
+
+test("the session section sums each turn's sub-agents", () => {
+  const s = summariseSession(
+    [row({ subagents: { count: 2, tokens: 500, spanS: 30, cost: 0.01 } }), row(), row({ subagents: { count: 1, tokens: 100, spanS: 5 } })],
+    SID
+  )
+  assert.deepEqual(s.subagents, { count: 3, tokens: 600, cost: 0.01 })
+  assert.deepEqual(continuation(s, "sub-agents"), ["3 · 600 tok", "$0.010"])
+})
+
+test("sub-agent time is split out of other, not added on top", () => {
+  // 20s total: 4s generating, 2s waiting, 6s of sub-agents running, 8s other.
+  // The sub-agent span is real time inside the turn's total.
+  const s = summariseSession([row({ subagents: { count: 1, tokens: 50, spanS: 6 } }), row()], SID)
+  assert.equal(s.time.generating, 4 / 20)
+  assert.equal(s.time.waiting, 2 / 20)
+  assert.equal(s.time.subagents, 6 / 20)
+  assert.equal(s.time.other, 8 / 20)
+})
+
+test("the time row names sub-agents only when some ran", () => {
+  const withSub = summariseSession([row({ subagents: { count: 1, tokens: 50, spanS: 6 } }), row()], SID)
+  assert.deepEqual(continuation(withSub, "time"), ["20% generating", "10% waiting", "30% sub-agents", "40% other"])
+  assert.deepEqual(continuation(summariseSession([row(), row()], SID), "time"), ["20% generating", "10% waiting", "70% other"])
+})
+
+test("the roll-up carries its sub-agents' steps -- one engine request each", () => {
+  const r = rollupSubagents([child({ steps: 2 }), child({ sessionID: "ses_b", steps: 3 })], ["ses_child", "ses_b"], 0, 40_000)
+  assert.equal(r.steps, 5)
+  // A row recorded before steps existed counts as one request.
+  assert.equal(rollupSubagents([child({ steps: undefined })], ["ses_child"], 0, 40_000).steps, 1)
+})
+
+console.log(`\n${passed} passed`)

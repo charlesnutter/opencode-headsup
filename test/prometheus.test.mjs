@@ -382,8 +382,8 @@ test("Prometheus: a rejected title request leaves the turn's engine figures inta
   const diff = diffPromSamples(before, now)
   const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 61.9, total: 5.86, rateWindow: "decode", tokens: 45 })
   assert.ok(out !== null, "a matching token count keeps the engine line")
-  assert.ok(out.includes("45 tok"), out)
-  assert.ok(out.includes("8200 prompt"), out)
+  assert.ok(out.includes("tokens 45"), out)
+  assert.ok(out.includes("prompt 8,200"), out)
 })
 
 test("Prometheus: a duration averaged over two requests is never shown as the turn's", () => {
@@ -438,8 +438,8 @@ test("Prometheus: a clean two-step tool turn keeps its engine tokens", () => {
   const diff = diffPromSamples(before, now)
   const out = formatPromLine(diff, "vllm-mlx", "m", { decodeTokS: 20.1, ttft: 3.2, total: 60.0, rateWindow: "decode", tokens: 84, steps: 2 })
   assert.ok(out !== null, "two steps, two TTFTs, matching tokens: this turn's")
-  assert.ok(out.includes("84 tok"), out)
-  assert.ok(out.includes("21423 prompt"), out)
+  assert.ok(out.includes("tokens 84"), out)
+  assert.ok(out.includes("prompt 21,423"), out)
   // TTFT: the host's first step, not the engine's mean over both steps (4.5s).
   assert.ok(out.includes("ttft 3.20s"), out)
   assert.ok(!out.includes("4.50"), out)
@@ -508,14 +508,14 @@ test("Prometheus: with neither rate available, no rate line is invented", () => 
   const out = formatPromLine(diff, "vLLM", "m", NO_FALLBACK)
   assert.ok(!out.includes("?"), out)
   assert.ok(!out.includes("tok/s"), "no rate at all rather than a placeholder")
-  assert.ok(out.includes("50 tok"), "exact token counts still survive")
+  assert.ok(out.includes("tokens 50"), "exact token counts still survive")
 })
 
 test("Prometheus: cached tokens are named only when some were reused", () => {
   const cold = { completionTokens: 50, promptTokens: 33, cachedTokens: 0, ttftExact: true }
   assert.ok(!formatPromLine(cold, "vLLM", "m", NO_FALLBACK).includes("cached"))
   const warm = { ...cold, cachedTokens: 34 }
-  assert.ok(formatPromLine(warm, "vLLM", "m", NO_FALLBACK).includes("34 cached"))
+  assert.ok(formatPromLine(warm, "vLLM", "m", NO_FALLBACK).includes("cached 34"))
 })
 
 test("Prometheus: a prefill rate appears only for an engine that times it", () => {
@@ -531,11 +531,29 @@ test("Prometheus: renders from a real live vLLM capture", () => {
     parsePromSample(fixture("vllm-metal-after.prom"), VLLM_SPEC)
   )
   const out = formatPromLine(diff, "vLLM", "Qwen2.5-0.5B", { decodeTokS: 18.2, total: 1.9 })
-  assert.ok(out.split("\n")[0].startsWith("vLLM  "), out)
+  assert.equal(out.split("\n")[0], "vLLM", "the heading names the engine, not the model")
   // The fixture header records usage {prompt_tokens: 35, completion_tokens: 35}.
-  assert.ok(out.includes("35 tok"), out)
-  assert.ok(out.includes("35 prompt"), out)
+  assert.ok(out.includes("tokens 35"), out)
+  assert.ok(out.includes("prompt 35"), out)
   assert.ok(!out.includes("?"), out)
+})
+
+// A sub-agent on the same engine adds its requests and tokens to the turn's
+// window. The window is accepted when it holds the turn's steps plus the
+// sub-agents', and the tokens equal both; its engine figures then cover both,
+// and the tokens line says so.
+test("Prometheus: a window with a same-engine sub-agent is accepted and labelled", () => {
+  const diff = { completionTokens: 1424, promptTokens: 30000, cachedTokens: 0, ttftExact: false,
+    requests: { ttft: 7, duration: 7 } }
+  const out = formatPromLine(diff, "vllm-mlx", "m",
+    { decodeTokS: 30, ttft: 1.2, total: 207.4, tokens: 1424, steps: 7, includesSubagents: true })
+  assert.ok(out !== null, "5 parent steps + 2 sub-agent steps, 1233 + 191 tokens")
+  assert.ok(out.includes("tokens 1,424\nincl. sub-agents") && out.includes("prompt 30,000"), out)
+})
+
+test("Prometheus: without the flag, the same line carries no such label", () => {
+  const diff = { completionTokens: 50, promptTokens: 33, cachedTokens: 0, ttftExact: true, requests: { ttft: 1, duration: 1 } }
+  assert.ok(!formatPromLine(diff, "vLLM", "m", { tokens: 50 }).includes("sub-agents"))
 })
 
 console.log(`\n${passed} passed`)
