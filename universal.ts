@@ -8,7 +8,8 @@
 // that also covered the model's thinking, understating reasoning-model rates
 // several-fold. See test/universal.test.mjs.
 
-import { nn, ni, short, tokensLabel, money } from "./format"
+import { nn, ni, money } from "./format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "./rows"
 
 // ---- Tier 1: universal, from OpenCode's own per-turn events -----------------
 import type { SessionMessageAssistant } from "@opencode-ai/client"
@@ -243,24 +244,23 @@ export function aggregateTurn(
 export interface Display {
   context: boolean
   /**
-   * Put the theme's offset panel shade behind the Session section. Off by
-   * default: on themes and terminals with a transparent background the shade
-   * can vanish, and the section already reads as separate by its heading,
-   * spacing and subdued rows. Judged live, in the user's own theme.
+   * The theme's offset panel shade behind each box (last turn, Session).
+   * On by default: it is what sets the boxes apart from OpenCode's own
+   * sidebar sections. Off for a theme or terminal with a transparent
+   * background, where the shade can vanish.
    */
-  sessionBackground: boolean
+  background: boolean
 }
 
-export const DEFAULT_DISPLAY: Display = { context: false, sessionBackground: false }
+export const DEFAULT_DISPLAY: Display = { context: false, background: true }
 
-export function universalLine(
+export function universalView(
   provider: string,
-  model: string,
   info: SessionMessageAssistant | undefined,
   turn?: Turn,
   display: Display = DEFAULT_DISPLAY,
   contextLimit?: number
-): string {
+): TurnView {
   const out: number = info?.tokens?.output ?? 0
   const reason: number = info?.tokens?.reasoning ?? 0
   // Reasoning tokens are decoded tokens: they are produced one at a time
@@ -271,55 +271,48 @@ export function universalLine(
   // where the engine's own log said 39.7 over the same 31.4s window.
   const generated = out + reason
   const { decodeTokS, ttft, total, rateWindow } = turnRate(generated, info, turn)
-
-  // A decode rate is left unqualified: the ttft beside it is what explains
-  // why the whole turn was slower, without asserting where that time went
-  // (ttft is queue + network + prefill + first-token compute, and only some
-  // engines can tell those apart).
-  //
-  // The FALLBACK rate is qualified, because it is a different measurement —
-  // tokens over the whole turn, not over the stream window. On a turn with a
-  // long wait those differ ~10x, so letting it pass as a decode rate would be
-  // wrong rather than merely terse.
+  // A rate recorded as whole-turn can only come from an older history row;
+  // it stays labelled so it is never read as generation speed.
   const overall = rateWindow === "whole" ? " overall" : ""
-  const ttftLabel = ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""
-  const rate =
-    decodeTokS !== undefined
-      ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}`
-      : ttftLabel.trim()
-  // OpenCode's output count excludes reasoning, so the topline adds them back.
-  // Retries are part of the total the user waited, so they are named beside
-  // it; without that, a 60s total over 15s of model work reads as a slow model.
-  const r = turn?.retries ?? 0
-  const retries = r > 0 ? ` (${r} ${r === 1 ? "retry" : "retries"})` : ""
-  const totals = `${tokensLabel(generated, reason)}${total !== undefined ? `  ${nn(total, 2)}s${retries}` : ""}`
 
-  // Cost and cache reuse, both from the host rather than any engine — so
-  // every provider gets them, including cloud models where Tier 2 never
-  // fires. This is the one place a cloud user sees a cache signal at all.
-  //
-  // `info.cost` is THIS turn's cost. `ctx.data.session.cost()` is a running
-  // session total and would grow every turn while appearing to describe one
-  // (measured: they differ by exactly the previous turn's cost). Per-turn is
-  // what every other figure on this panel means, so per-turn is what is used.
-  //
-  // Both are omitted entirely when absent or zero: a free model showing
-  // "$0.00" and a cold prompt showing "0 cached" are the same absent-is-not-
-  // zero mistake the counters already avoid.
+  // Cost and cache reuse come from the host, so every provider gets them,
+  // including cloud models where no engine is read. `info.cost` is THIS
+  // turn's cost, never the running session total. Both are omitted when
+  // absent or zero: "$0.00" and "0 cached" would be absent-as-zero.
   const cost = money(info?.cost)
   const cacheRead = info?.tokens?.cache?.read ?? 0
-  const cacheLabel = cacheRead > 0 ? `${ni(cacheRead)} cached` : ""
-  const extras = [cost, cacheLabel].filter(Boolean).join("  ")
 
-  // Opt-in only (see Display.context). `prompt/limit`, never `context used`
-  // or a bare percentage — the wording itself is the caveat that this may
-  // not agree with the host's own figure, which uses data and a formula
-  // this plugin cannot see.
+  // Opt-in only (see Display.context). `prompt/limit`, never `context used`:
+  // the wording is the caveat that this may not agree with the host's own
+  // figure, which uses data and a formula this plugin cannot see.
   const context =
     display.context && contextLimit !== undefined && contextLimit > 0
-      ? `${ni((info?.tokens?.input ?? 0) / contextLimit * 100)}% prompt/limit`
+      ? `${ni(((info?.tokens?.input ?? 0) / contextLimit) * 100)}% prompt/limit`
       : ""
 
-  return [`${provider}  ${short(model)}`, rate, totals, extras, context].filter(Boolean).join("\n")
+  const rows: Row[] = [
+    ...rowsOf("speed", [decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}` : ""]),
+    ...rowsOf("ttft", [ttft !== undefined ? `${nn(ttft, 2)}s` : ""]),
+    // OpenCode's output count excludes reasoning, so tokens adds it back;
+    // thinking is shown as the subset it is, never as an addition.
+    ...rowsOf("tokens", [nt(generated), reason > 0 ? `${nt(reason)} thinking` : ""]),
+    ...timeRows(total, turn?.retries ?? 0),
+    ...rowsOf("cost", [cost]),
+    ...rowsOf("cached", [cacheRead > 0 ? nt(cacheRead) : ""]),
+    ...rowsOf("context", [context]),
+  ]
+  return { engine: provider, rows, notes: [], key: decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}` : undefined }
+}
+
+/** The view as text; kept for tests that look for a figure. */
+export function universalLine(
+  provider: string,
+  _model: string,
+  info: SessionMessageAssistant | undefined,
+  turn?: Turn,
+  display: Display = DEFAULT_DISPLAY,
+  contextLimit?: number
+): string {
+  return viewText(universalView(provider, info, turn, display, contextLimit))
 }
 

@@ -16,6 +16,7 @@
 
 import { nn, ni, short, money } from "./format"
 import type { TurnRecord } from "./history"
+import { rowsOf, nt, type Row, type TurnView } from "./rows"
 
 /** Recent turns shown in the generation trend. */
 export const TREND_TURNS = 8
@@ -89,10 +90,13 @@ export function rollupSubagents(
   }
 }
 
-/** The per-turn block's sub-agent line: sums only, never a rate. */
-export function formatSubagentLine(r: SubagentRollup): string {
-  const cost = money(r.cost)
-  return `+${ni(r.count)} sub-agent${r.count === 1 ? "" : "s"}  ${ni(r.tokens)} tok  ${nn(r.spanS, 2)}s${cost ? `  ${cost}` : ""}`
+/** The per-turn box's sub-agent rows: sums only, never a rate. */
+export function subagentRows(r: SubagentRollup): Row[] {
+  return rowsOf(r.count === 1 ? "sub-agent" : "sub-agents", [
+    r.count === 1 ? `${nt(r.tokens)} tok` : `${ni(r.count)} · ${nt(r.tokens)} tok`,
+    `${nn(r.spanS, 2)}s`,
+    money(r.cost),
+  ])
 }
 
 /** A turn's streaming time: recorded, or derived from an older row's rate. */
@@ -232,55 +236,53 @@ export function sparkline(values: readonly number[]): string {
     .join("")
 }
 
-/**
- * The section's heading. Collapsed, it keeps its key figure so the closed
- * section is still useful; expanded, the figures follow below it. It names
- * the model and turn range when the session changed model partway through.
- */
-export function sessionHeading(s: SessionSummary, expanded: boolean): string {
-  const scope =
-    s.turns === s.totalTurns
-      ? `${ni(s.turns)} ${s.turns === 1 ? "turn" : "turns"}`
-      : `${short(s.model, 16)} · ${ni(s.turns)} of ${ni(s.totalTurns)} turns`
-  if (expanded) return `▾ Session · ${scope}`
-  const key = s.genTokS !== undefined ? ` · ${nn(s.genTokS)} tok/s avg` : ""
-  return `▸ Session · ${scope}${key}`
-}
-
 const pct = (v: number): string => `${ni(v * 100)}%`
 
-/** The expanded section's rows, as label/value pairs; absent figures leave none. */
-export function sessionRows(s: SessionSummary): Array<[string, string]> {
-  const rows: Array<[string, string]> = []
+/**
+ * The section as a view, laid out like the per-turn box: a heading, then
+ * labelled rows, one figure per line. The heading names the model and turn
+ * range when the session changed model partway through; collapsed, it keeps
+ * the average generation speed as its one figure.
+ */
+export function sessionView(s: SessionSummary): TurnView {
+  const engine =
+    s.turns === s.totalTurns
+      ? `Session · ${ni(s.turns)} ${s.turns === 1 ? "turn" : "turns"}`
+      : `Session · ${short(s.model, 14)} · ${ni(s.turns)}/${ni(s.totalTurns)}`
+  const rows: Row[] = []
   if (s.genTokS !== undefined) {
+    rows.push(["speed", `${nn(s.genTokS)} tok/s avg`])
     const spark = sparkline(s.trend)
-    rows.push(["generation", `${nn(s.genTokS)} tok/s avg${spark ? ` ${spark}` : ""}`])
+    if (spark) rows.push(["trend", spark])
   }
   if (s.ttftMedian !== undefined && s.ttftMax !== undefined) {
-    rows.push([
-      "ttft",
-      s.turns > 1 ? `${nn(s.ttftMedian, 2)}s median · ${nn(s.ttftMax, 2)}s max` : `${nn(s.ttftMedian, 2)}s`,
-    ])
+    rows.push(
+      ...(s.turns > 1
+        ? rowsOf("ttft", [`${nn(s.ttftMedian, 2)}s median`, `${nn(s.ttftMax, 2)}s max`])
+        : rowsOf("ttft", [`${nn(s.ttftMedian, 2)}s`]))
+    )
   }
   if (s.cacheHit !== undefined) rows.push(["cache", `${pct(s.cacheHit)} hit`])
   if (s.time) {
-    const parts = [`${pct(s.time.generating)} gen`, `${pct(s.time.waiting)} wait`]
-    if (s.time.subagents > 0) parts.push(`${pct(s.time.subagents)} sub-agents`)
-    parts.push(`${pct(s.time.other)} other`)
-    rows.push(["time", parts.join(" · ")])
+    rows.push(
+      ...rowsOf("time", [
+        `${pct(s.time.generating)} generating`,
+        `${pct(s.time.waiting)} waiting`,
+        s.time.subagents > 0 ? `${pct(s.time.subagents)} sub-agents` : "",
+        `${pct(s.time.other)} other`,
+      ])
+    )
   }
   if (s.engine) {
-    const e = [
-      s.engine.mtpX !== undefined ? `MTP ${nn(s.engine.mtpX, 2)}x` : "",
-      s.engine.draftAccept !== undefined ? `draft ${pct(s.engine.draftAccept)}` : "",
-      s.engine.prefillTokS !== undefined ? `prefill ${ni(s.engine.prefillTokS)} tok/s` : "",
-    ].filter(Boolean)
-    if (e.length > 0) rows.push(["engine", e.join(" · ")])
+    if (s.engine.mtpX !== undefined) rows.push(["MTP", `${nn(s.engine.mtpX, 2)}x avg`])
+    if (s.engine.draftAccept !== undefined) rows.push(["draft", `${pct(s.engine.draftAccept)} avg`])
+    if (s.engine.prefillTokS !== undefined) rows.push(["prefill", `${ni(s.engine.prefillTokS)} tok/s avg`])
   }
   if (s.subagents) {
-    const cost = money(s.subagents.cost)
-    rows.push(["sub-agents", `${ni(s.subagents.count)} · ${ni(s.subagents.tokens)} tok${cost ? ` · ${cost}` : ""}`])
+    rows.push(
+      ...rowsOf("sub-agents", [`${ni(s.subagents.count)} · ${nt(s.subagents.tokens)} tok`, money(s.subagents.cost)])
+    )
   }
   if (s.retries > 0) rows.push(["retries", ni(s.retries)])
-  return rows
+  return { engine, rows, notes: [], key: s.genTokS !== undefined ? `${nn(s.genTokS)} tok/s` : undefined }
 }

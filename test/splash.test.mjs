@@ -174,7 +174,7 @@ test("Splash: renders the full line from a real captured turn", () => {
     parseSplashSample(fixture("splash-after.prom"))
   )
   const out = formatSplashLine(t, "incoai/Qwen3.8-27B-Splash").split("\n")
-  assert.ok(out[0].startsWith("Splash  "), out[0])
+  assert.equal(out[0], "Splash", "the heading names the engine, not the model")
   // Every line must be a real figure; a "?" means a caller should have
   // dropped the line instead of printing it.
   assert.ok(!out.some((l) => l.includes("?")), out.join(" | "))
@@ -190,7 +190,7 @@ test("Splash: the prompt line sums prefilled and cached, not just prefilled", ()
   )
   const out = formatSplashLine(t, "m")
   const total = t.promptTokens + t.cachedTokens
-  assert.ok(out.includes(`${total} prompt`), `expected ${total} prompt in: ${out}`)
+  assert.ok(out.includes(`prompt ${total}`), `expected prompt ${total} in: ${out}`)
 })
 
 test("Splash: cached is named only when some was actually reused", () => {
@@ -198,7 +198,7 @@ test("Splash: cached is named only when some was actually reused", () => {
     decodeS: 5, prefillS: 0.27, decodeTokS: 40, prefillTokS: 233, requests: 1 }
   assert.ok(!formatSplashLine(cold, "m").includes("cached"), "cold prompt must not mention cache")
   const warm = { ...cold, promptTokens: 31, cachedTokens: 32 }
-  assert.ok(formatSplashLine(warm, "m").includes("32 cached"), "a real cache hit must be named")
+  assert.ok(formatSplashLine(warm, "m").includes("cached 32"), "a real cache hit must be named")
 })
 
 test("Splash: an absent rate is omitted, never rendered as a placeholder", () => {
@@ -207,7 +207,7 @@ test("Splash: an absent rate is omitted, never rendered as a placeholder", () =>
   const out = formatSplashLine(t, "m")
   assert.ok(!out.includes("?"), out)
   assert.ok(!out.includes("tok/s"), "no rate should appear at all")
-  assert.ok(out.includes("200 tok"), "the token count still survives")
+  assert.ok(out.includes("tokens 200"), "the token count still survives")
 })
 
 test("Splash: no speculation means no accept line, not 0% accepted", () => {
@@ -284,7 +284,7 @@ test("Splash: a verified multi-step turn needs no 'requests this turn' note", ()
   const t = { ...diffSplashSamples(b, a), requests: 2 }
   const verified = formatSplashLine(t, "m", 0.4, { total: 9.0, steps: 2 })
   assert.ok(!verified.includes("requests this turn"), verified)
-  assert.ok(verified.includes("200 tok  9.00s"), verified)
+  assert.ok(verified.includes("tokens 200\ntime 9.00s"), verified)
   // Unverified (no step count), the note still says the figures are sums.
   assert.ok(formatSplashLine(t, "m").includes("2 requests this turn"))
 })
@@ -293,7 +293,7 @@ test("Splash: figures that include a same-engine sub-agent say so", () => {
   const [b, a] = pair("splash")
   const t = { ...diffSplashSamples(b, a), requests: 2 }
   const out = formatSplashLine(t, "m", 0.4, { total: 9.0, steps: 2, includesSubagents: true })
-  assert.ok(out.includes("200 tok  9.00s incl. sub-agents"), out)
+  assert.ok(out.includes("tokens 200\nincl. sub-agents\ntime 9.00s"), out)
 })
 
 console.log(`\n${passed} passed`)

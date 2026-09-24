@@ -10,12 +10,23 @@ the provider.
 
 
 ```
-MTPLX  arsis-dev-ukisai-swift-…
-38.1 tok/s  ttft 9.06s
-prefill 452 tok/s
-37 tok  10.03s
-MTP 3.70x 99/96/80%
+▾ MTPLX · last turn
+
+speed       34.4 tok/s
+ttft        17.19s
+prefill     460 tok/s
+tokens      1,233
+time        207.37s
+MTP         3.42x
+accepted    91/79/64%
+sub-agent   191 tok
+            23.91s
+
+▸ Session · 14 turns  48.2 tok/s
 ```
+
+Two boxes, each opened and closed by clicking its heading: the last turn,
+and the session so far.
 
 Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
 (OpenCode 1.18.x), see
@@ -79,7 +90,7 @@ does not — there is nothing to choose.
   "plugins": [
     {
       "package": "@banburist/opencode-headsup",
-      "options": { "showContext": false, "sessionBackground": false }
+      "options": { "showContext": false, "background": true }
     }
   ]
 }
@@ -92,11 +103,11 @@ Adds a `13% prompt/limit` line, computed as
 config in `opencode.json`. Labeled as `prompt/limit` rather than
 `context used`.
 
-**sessionBackground** (default `false`)
+**background** (default `true`)
 
-Puts your theme's offset panel shade behind the Session section. Off by
-default because some themes and terminals use a transparent background,
-where the shade can disappear.
+Puts your theme's offset panel shade behind each box. Turn it off for a
+theme or terminal with a transparent background, where the shade can
+disappear.
 
 ### Endpoints
 

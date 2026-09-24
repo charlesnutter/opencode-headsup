@@ -16,7 +16,8 @@
 // without the TUI runtime.
 
 import { httpJson, type HttpOptions } from "../http"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
 /**
  * The fields of /api/extra/perf this plugin reads. The endpoint returns more
  * (image/TTS/transcription counters, horde bookkeeping, seeds) that describe
@@ -228,33 +229,40 @@ export function combineKoboldSteps(
 }
 
 /**
- * `host.total` is the turn's total from OpenCode -- what the user waited,
- * retries included -- and wins over the engine's prefill + decode time.
+ * The turn as labelled rows. `host.total` is the turn's total from OpenCode
+ * -- what the user waited, retries included -- and wins over the engine's
+ * prefill + decode time. TTFT is the host's, labelled as such: KoboldCpp
+ * reports none, and nothing on these rows takes its numerator from one
+ * source and its denominator from the other.
  */
+export function koboldView(
+  t: KoboldTurn,
+  hostTtft?: number,
+  host: { total?: number; retries?: number } = {}
+): TurnView {
+  const rows: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("ttft", [hostTtft !== undefined ? `${nn(hostTtft, 2)}s (host)` : ""]),
+    ...rowsOf("prefill", [t.prefillTokS !== undefined ? `${ni(t.prefillTokS)} tok/s` : ""]),
+    ["tokens", nt(t.completionTokens)],
+    ...timeRows(host.total ?? t.prefillS + t.decodeS, host.retries),
+    ...rowsOf("draft", [t.draftAcceptRate !== undefined ? `${ni(t.draftAcceptRate * 100)}% accepted` : ""]),
+  ]
+  const notes =
+    t.generationsInWindow !== undefined && t.generationsInWindow > 1
+      ? [`${ni(t.generationsInWindow)} generations this turn`, "(last shown only)"]
+      : []
+  return { engine: "KoboldCpp", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+}
+
+/** The view as text; kept for tests that look for a figure. */
 export function formatKoboldLine(
   t: KoboldTurn,
-  model: string,
+  _model: string,
   hostTtft?: number,
   host: { total?: number; retries?: number } = {}
 ): string {
-  // Host-derived, and labelled as such. No derived figure on this line takes
-  // its numerator from one source and its denominator from the other -- ttft
-  // is measured directly, so nothing crosses the seam.
-  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
-  return [
-    `KoboldCpp  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
-    t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
-    `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.prefillS + t.decodeS, 2)}s${
-      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }`,
-    t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",
-    t.generationsInWindow !== undefined && t.generationsInWindow > 1
-      ? `${ni(t.generationsInWindow)} generations this turn (last shown only)`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n")
+  return viewText(koboldView(t, hostTtft, host))
 }
 
 export async function fetchKoboldPerf(

@@ -17,7 +17,8 @@
 
 import { sumLabeledMetric } from "../prometheus-text"
 import { httpText, type HttpOptions } from "../http"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
 
 /**
  * Names verified against the server's own metrics.py (Splash 1.0), which maps
@@ -193,35 +194,40 @@ export function splashIsThisTurn(t: SplashTurn, host: { tokens?: number; steps?:
 }
 
 /**
- * `host.total` is the turn's total from OpenCode -- what the user waited,
- * retries included -- and wins over the engine's phase times. `host.steps`
- * set means the window was checked against the turn's steps, so its
- * requests are all accounted for and need no "requests this turn" note.
+ * The turn as labelled rows. `host.total` is the turn's total from OpenCode
+ * -- what the user waited, retries included -- and wins over the engine's
+ * phase times. TTFT is the host's, labelled. `host.steps` set means the
+ * window was checked against the turn's steps, so its requests are all
+ * accounted for and need no "requests this turn" note. The prompt is what
+ * Splash prefilled plus what its prefix cache served.
  */
+export function splashView(
+  t: SplashTurn,
+  hostTtft?: number,
+  host: { total?: number; retries?: number; steps?: number; includesSubagents?: boolean } = {}
+): TurnView {
+  const rows: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("ttft", [hostTtft !== undefined ? `${nn(hostTtft, 2)}s (host)` : ""]),
+    ...rowsOf("prefill", [t.prefillTokS !== undefined ? `${ni(t.prefillTokS)} tok/s` : ""]),
+    ...rowsOf("tokens", [nt(t.completionTokens), host.includesSubagents ? "incl. sub-agents" : ""]),
+    ...timeRows(host.total ?? t.prefillS + t.decodeS, host.retries),
+    ["prompt", nt(t.promptTokens + t.cachedTokens)],
+    ...rowsOf("cached", [t.cachedTokens > 0 ? nt(t.cachedTokens) : ""]),
+    ...rowsOf("draft", [t.draftAcceptRate !== undefined ? `${ni(t.draftAcceptRate * 100)}% accepted` : ""]),
+  ]
+  // Only when a turn spanned several requests nobody accounted for, so the
+  // figures above read as sums rather than as one reply.
+  const notes = t.requests > 1 && host.steps === undefined ? [`${ni(t.requests)} requests this turn`] : []
+  return { engine: "Splash", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+}
+
+/** The view as text; kept for tests that look for a figure. */
 export function formatSplashLine(
   t: SplashTurn,
-  model: string,
+  _model: string,
   hostTtft?: number,
   host: { total?: number; retries?: number; steps?: number; includesSubagents?: boolean } = {}
 ): string {
-  // Host-derived, and labelled as such. No derived figure on this line takes
-  // its numerator from one source and its denominator from the other -- ttft
-  // is measured directly, so nothing crosses the seam.
-  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
-  const prompt = t.promptTokens + t.cachedTokens
-  return [
-    `Splash  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
-    t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
-    `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.prefillS + t.decodeS, 2)}s${
-      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }${host.includesSubagents ? " incl. sub-agents" : ""}`,
-    `${ni(prompt)} prompt${t.cachedTokens > 0 ? `, ${ni(t.cachedTokens)} cached` : ""}`,
-    t.draftAcceptRate !== undefined ? `draft ${ni(t.draftAcceptRate * 100)}% accepted` : "",
-    // Only when a turn spanned several requests (tool round trips), so the
-    // figures above read as sums rather than as one reply.
-    t.requests > 1 && host.steps === undefined ? `${ni(t.requests)} requests this turn` : "",
-  ]
-    .filter(Boolean)
-    .join("\n")
+  return viewText(splashView(t, hostTtft, host))
 }

@@ -21,7 +21,8 @@
 
 import { sumLabeledMetric } from "../prometheus-text"
 import { httpText, type HttpOptions } from "../http"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
 
 export interface LlamaCppCounters {
   promptTokens: number
@@ -121,30 +122,38 @@ export function llamaCppIsThisTurn(t: LlamaCppTurn, hostTokens: number | undefin
 }
 
 /**
+ * The turn as labelled rows under `label` (llama.cpp or llamafile).
  * `host.total` is the turn's total from OpenCode -- what the user waited,
- * retries included -- and wins over the engine's own timings.
+ * retries included -- and wins over the engine's own timings. TTFT is the
+ * host's, labelled: llama.cpp reports none of its own.
+ * `host.includesSubagents`: the window also held same-engine sub-agents'
+ * requests, so the token count covers theirs too, and says so.
  */
+export function llamaCppView(
+  t: LlamaCppTurn,
+  label: string,
+  hostTtft?: number,
+  host: { total?: number; retries?: number; includesSubagents?: boolean } = {}
+): TurnView {
+  const rows: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("ttft", [hostTtft !== undefined ? `${nn(hostTtft, 2)}s (host)` : ""]),
+    ...rowsOf("prefill", [t.prefillTokS !== undefined ? `${ni(t.prefillTokS)} tok/s` : ""]),
+    ...rowsOf("tokens", [nt(t.completionTokens), host.includesSubagents ? "incl. sub-agents" : ""]),
+    ...timeRows(host.total ?? t.decodeS + t.prefillS, host.retries),
+  ]
+  return { engine: label, rows, notes: [], key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+}
+
+/** The view as text; kept for tests that look for a figure. */
 export function formatLlamaCppLine(
   t: LlamaCppTurn,
   label: string,
-  model: string,
+  _model: string,
   hostTtft?: number,
   host: { total?: number; retries?: number; includesSubagents?: boolean } = {}
 ): string {
-  // Host-derived, and labelled as such. No derived figure on this line takes
-  // its numerator from one source and its denominator from the other -- ttft
-  // is measured directly, so nothing crosses the seam.
-  const ttftLabel = hostTtft !== undefined ? `  ttft ${nn(hostTtft, 2)}s (host)` : ""
-  return [
-    `${label}  ${short(model)}`,
-    t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s${ttftLabel}` : ttftLabel.trim(),
-    t.prefillTokS !== undefined ? `prefill ${ni(t.prefillTokS)} tok/s` : "",
-    `${ni(t.completionTokens)} tok  ${nn(host.total ?? t.decodeS + t.prefillS, 2)}s${
-      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }${host.includesSubagents ? " incl. sub-agents" : ""}`,
-  ]
-    .filter(Boolean)
-    .join("\n")
+  return viewText(llamaCppView(t, label, hostTtft, host))
 }
 
 export async function fetchLlamaCppCounters(

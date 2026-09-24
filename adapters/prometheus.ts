@@ -8,7 +8,8 @@
 
 import { httpText, type HttpOptions } from "../http"
 import { sumLabeledMetric } from "../prometheus-text"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
 export interface PromSpec {
   prefix: string
   promptTokens: string
@@ -296,6 +297,59 @@ export function diffPromSamples(prev: PromSample, now: PromSample): PromDiff | n
  * A `fallback.tokens` of 0 or absent means OpenCode has no count for the turn,
  * and the token check is skipped rather than failing every turn.
  */
+export function promView(
+  diff: PromDiff,
+  label: string,
+  model: string,
+  fallback: {
+    decodeTokS?: number
+    ttft?: number
+    total?: number
+    rateWindow?: "decode" | "whole"
+    tokens?: number
+    /** Assistant messages in the turn; a tool-using turn is one per step. */
+    steps?: number
+    retries?: number
+    /**
+     * The window also holds sub-agents' requests on this same engine; `tokens`
+     * and `steps` already include theirs. The counters can't separate them,
+     * so the engine's figures cover both, and the tokens line says so.
+     */
+    includesSubagents?: boolean
+  }
+): TurnView | null {
+  // One TTFT per step: a tool-using turn makes one request per step, so its
+  // window legitimately holds several. Anything else is another request.
+  const steps = fallback.steps ?? 1
+  const ttftCount = diff.requests?.ttft ?? (diff.ttftExact ? 1 : -1)
+  if (ttftCount !== steps) return null
+  const host = fallback.tokens
+  if (host !== undefined && host > 0 && host !== diff.completionTokens) return null
+  const single = steps === 1
+  // The rate is generation only. The engine's own decode rate (duration minus
+  // TTFT, one request) wins where it exists; otherwise the host's, which is
+  // also measured from the stream after the first token. Over several steps
+  // the engine's figures are per-request means, so the host's are used.
+  const decodeTokS = (single ? diff.decodeTokS : undefined) ?? fallback.decodeTokS
+  const isDecode = decodeTokS !== undefined && (diff.decodeTokS !== undefined || fallback.rateWindow !== "whole")
+  const overall = decodeTokS !== undefined && !isDecode ? " overall" : ""
+  // The total is what the user waited: the host's, retries included. The
+  // engine's request duration excludes retries and anything before the step.
+  const total = fallback.total ?? (single ? diff.durationS : undefined)
+  const ttft = single ? diff.ttft : fallback.ttft
+  const rows: Row[] = [
+    ...rowsOf("speed", [decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}` : ""]),
+    ...rowsOf("ttft", [ttft !== undefined ? `${nn(ttft, 2)}s` : ""]),
+    ...rowsOf("prefill", [single && diff.prefillTokS !== undefined ? `${ni(diff.prefillTokS)} tok/s` : ""]),
+    ...rowsOf("tokens", [nt(diff.completionTokens), fallback.includesSubagents ? "incl. sub-agents" : ""]),
+    ...timeRows(total, fallback.retries),
+    ["prompt", nt(diff.promptTokens)],
+    ...rowsOf("cached", [diff.cachedTokens > 0 ? nt(diff.cachedTokens) : ""]),
+  ]
+  return { engine: label, rows, notes: [], key: decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}` : undefined }
+}
+
+/** The view as text, or null when declined; kept for tests that look for a figure. */
 export function formatPromLine(
   diff: PromDiff,
   label: string,
@@ -317,36 +371,6 @@ export function formatPromLine(
     includesSubagents?: boolean
   }
 ): string | null {
-  // One TTFT per step: a tool-using turn makes one request per step, so its
-  // window legitimately holds several. Anything else is another request.
-  const steps = fallback.steps ?? 1
-  const ttftCount = diff.requests?.ttft ?? (diff.ttftExact ? 1 : -1)
-  if (ttftCount !== steps) return null
-  const host = fallback.tokens
-  if (host !== undefined && host > 0 && host !== diff.completionTokens) return null
-  const single = steps === 1
-  // The rate is generation only. The engine's own decode rate (duration minus
-  // TTFT, one request) wins where it exists; otherwise the host's, which is
-  // also measured from the stream after the first token. Over several steps
-  // the engine's figures are per-request means, so the host's are used.
-  const decodeTokS = (single ? diff.decodeTokS : undefined) ?? fallback.decodeTokS
-  const isDecode = decodeTokS !== undefined && (diff.decodeTokS !== undefined || fallback.rateWindow !== "whole")
-  const overall = decodeTokS !== undefined && !isDecode ? " overall" : ""
-  // The total is what the user waited: the host's, retries included. The
-  // engine's request duration excludes retries and anything before the step.
-  const total = fallback.total ?? (single ? diff.durationS : undefined)
-  const r = fallback.retries ?? 0
-  const retries = r > 0 ? ` (${r} ${r === 1 ? "retry" : "retries"})` : ""
-  const ttft = single ? diff.ttft : fallback.ttft
-  const ttftLabel = ttft !== undefined ? `  ttft ${nn(ttft, 2)}s` : ""
-  return [
-    `${label}  ${short(model)}`,
-    decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}${ttftLabel}` : ttftLabel.trim(),
-    single && diff.prefillTokS !== undefined ? `prefill ${ni(diff.prefillTokS)} tok/s` : "",
-    `${ni(diff.completionTokens)} tok  (${ni(diff.promptTokens)} prompt${
-      diff.cachedTokens > 0 ? `, ${ni(diff.cachedTokens)} cached` : ""
-    })${fallback.includesSubagents ? " incl. sub-agents" : ""}${total !== undefined ? `  ${nn(total, 2)}s${retries}` : ""}`,
-  ]
-    .filter(Boolean)
-    .join("\n")
+  const v = promView(diff, label, model, fallback)
+  return v ? viewText(v) : null
 }

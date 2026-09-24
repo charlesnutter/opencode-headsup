@@ -6,7 +6,7 @@
 // models, and an engine-only figure is averaged only over turns that had it.
 // Run with: bun test/session.test.mjs
 import { strict as assert } from "node:assert"
-import { summariseSession, sessionHeading, sessionRows, sparkline, rollupSubagents, formatSubagentLine } from "../session.ts"
+import { summariseSession, sessionView, sparkline, rollupSubagents, subagentRows } from "../session.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -114,27 +114,48 @@ test("retries are summed", () => {
   assert.equal(summariseSession([row({ retries: 2 }), row({ retries: 1 }), row()], SID).retries, 3)
 })
 
-test("the collapsed heading keeps its key figure", () => {
-  const s = summariseSession([row(), row()], SID)
-  assert.equal(sessionHeading(s, false), "▸ Session · 2 turns · 50.0 tok/s avg")
-  assert.equal(sessionHeading(s, true), "▾ Session · 2 turns")
+// Row values in the mockup: one figure per line, a value with parts
+// continuing under an empty label, every row within the box's 34 cells.
+const rowsOfView = (s) => sessionView(s).rows
+const labelled = (s) => Object.fromEntries(rowsOfView(s).filter(([l]) => l))
+const continuation = (s, label) => {
+  const rows = rowsOfView(s)
+  const i = rows.findIndex(([l]) => l === label)
+  const out = [rows[i][1]]
+  for (let j = i + 1; j < rows.length && rows[j][0] === ""; j++) out.push(rows[j][1])
+  return out
+}
+
+test("the heading names the session, and collapsed it keeps the average speed", () => {
+  const v = sessionView(summariseSession([row(), row()], SID))
+  assert.equal(v.engine, "Session · 2 turns")
+  assert.equal(v.key, "50.0 tok/s")
 })
 
 test("a heading says which turns count when the model changed", () => {
-  const s = summariseSession([row({ model: "b" }), row(), row()], SID)
-  assert.equal(sessionHeading(s, true), "▾ Session · b · 1 of 3 turns")
+  const v = sessionView(summariseSession([row({ model: "b" }), row(), row()], SID))
+  assert.equal(v.engine, "Session · b · 1/3")
 })
 
 test("one turn is singular", () => {
-  assert.equal(sessionHeading(summariseSession([row()], SID), true), "▾ Session · 1 turn")
+  assert.equal(sessionView(summariseSession([row()], SID)).engine, "Session · 1 turn")
+})
+
+test("every row fits the box's 34 cells", () => {
+  const s = summariseSession(
+    [row({ ttft: 0.5, retries: 2, engine: { mtpX: 3.4, prefillTokS: 449, draftAccept: 0.7 },
+      subagents: { count: 2, tokens: 12345, spanS: 30, cost: 0.012 } }), row({ ttft: 17.6 })],
+    SID
+  )
+  rowsOfView(s).forEach(([l, v]) => assert.ok(12 + v.length <= 34, `${l}: ${v}`))
 })
 
 test("rows are label/value pairs, and an absent figure leaves no row", () => {
   const s = summariseSession([row({ ttft: undefined, cached: undefined, promptTokens: undefined })], SID)
-  const labels = sessionRows(s).map(([l]) => l)
+  const labels = rowsOfView(s).map(([l]) => l)
   assert.ok(!labels.includes("ttft"), labels.join(","))
   assert.ok(!labels.includes("cache"), labels.join(","))
-  assert.ok(labels.includes("generation"))
+  assert.ok(labels.includes("speed"))
 })
 
 test("rows read as aggregates: avg, median, max, %", () => {
@@ -142,12 +163,13 @@ test("rows read as aggregates: avg, median, max, %", () => {
     [row({ ttft: 0.5, retries: 2, engine: { mtpX: 3.4, prefillTokS: 449 } }), row({ ttft: 17.6 })],
     SID
   )
-  const rows = Object.fromEntries(sessionRows(s))
-  assert.ok(rows.generation.startsWith("50.0 tok/s avg"), rows.generation)
-  assert.equal(rows.ttft, "9.05s median · 17.60s max")
+  const rows = labelled(s)
+  assert.equal(rows.speed, "50.0 tok/s avg")
+  assert.deepEqual(continuation(s, "ttft"), ["9.05s median", "17.60s max"])
   assert.equal(rows.cache, "80% hit")
-  assert.equal(rows.time, "20% gen · 10% wait · 70% other")
-  assert.equal(rows.engine, "MTP 3.40x · prefill 449 tok/s")
+  assert.deepEqual(continuation(s, "time"), ["20% generating", "10% waiting", "70% other"])
+  assert.equal(rows.MTP, "3.40x avg")
+  assert.equal(rows.prefill, "449 tok/s avg")
   assert.equal(rows.retries, "2")
 })
 
@@ -191,9 +213,8 @@ test("sub-agent time is the span they ran, not a sum -- they can run in parallel
 
 test("the per-turn line sums tokens, time and cost but never a rate", () => {
   const r = rollupSubagents([child()], ["ses_child"], 0, 40_000)
-  const line = formatSubagentLine(r)
-  assert.equal(line, "+1 sub-agent  228 tok  25.00s  $0.0040")
-  assert.ok(!line.includes("tok/s"))
+  assert.deepEqual(subagentRows(r), [["sub-agent", "228 tok"], ["", "25.00s"], ["", "$0.0040"]])
+  assert.ok(!subagentRows(r).some(([, v]) => v.includes("tok/s")))
 })
 
 test("the session section sums each turn's sub-agents", () => {
@@ -202,7 +223,7 @@ test("the session section sums each turn's sub-agents", () => {
     SID
   )
   assert.deepEqual(s.subagents, { count: 3, tokens: 600, cost: 0.01 })
-  assert.equal(Object.fromEntries(sessionRows(s))["sub-agents"], "3 · 600 tok · $0.010")
+  assert.deepEqual(continuation(s, "sub-agents"), ["3 · 600 tok", "$0.010"])
 })
 
 test("sub-agent time is split out of other, not added on top", () => {
@@ -216,10 +237,9 @@ test("sub-agent time is split out of other, not added on top", () => {
 })
 
 test("the time row names sub-agents only when some ran", () => {
-  const with_ = Object.fromEntries(sessionRows(summariseSession([row({ subagents: { count: 1, tokens: 50, spanS: 6 } }), row()], SID)))
-  assert.equal(with_.time, "20% gen · 10% wait · 30% sub-agents · 40% other")
-  const without = Object.fromEntries(sessionRows(summariseSession([row(), row()], SID)))
-  assert.equal(without.time, "20% gen · 10% wait · 70% other")
+  const withSub = summariseSession([row({ subagents: { count: 1, tokens: 50, spanS: 6 } }), row()], SID)
+  assert.deepEqual(continuation(withSub, "time"), ["20% generating", "10% waiting", "30% sub-agents", "40% other"])
+  assert.deepEqual(continuation(summariseSession([row(), row()], SID), "time"), ["20% generating", "10% waiting", "70% other"])
 })
 
 test("the roll-up carries its sub-agents' steps -- one engine request each", () => {

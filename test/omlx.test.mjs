@@ -27,7 +27,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { recoverLatest, formatOmlxLine, toOmlxSample, omlxIsThisTurn } from "../adapters/omlx.ts"
+import { recoverLatest, formatOmlxLine, toOmlxSample, omlxIsThisTurn, omlxView } from "../adapters/omlx.ts"
 
 const dir = path.dirname(fileURLToPath(import.meta.url))
 const fixture = (name) => JSON.parse(readFileSync(path.join(dir, "..", "fixtures", name), "utf8"))
@@ -87,11 +87,10 @@ test("with no prior request this session, shows the server average, labelled", (
 test("one real request recovers the exact rate the server measured", () => {
   // before: requests 0, avgGen 0. after: requests 1, avgGen 80, avgPrefill 72.3.
   // recoverLatest(0,0,80,1) = 80*1 - 0*0 = 80 exactly.
-  const out = formatOmlxLine(afterOne, before).split("\n")
-  assert.equal(out.length, 4, out.join(" | "))
-  assert.equal(out[1], "80.0 tok/s")
-  assert.equal(out[2], "prefill 72 tok/s")
-  assert.ok(!out.some((l) => l.includes("avg")), "a single recovered request carries no avg label")
+  const rows = Object.fromEntries(omlxView(afterOne, before).rows)
+  assert.equal(rows.speed, "80.0 tok/s")
+  assert.equal(rows.prefill, "72 tok/s")
+  assert.ok(!formatOmlxLine(afterOne, before).includes("avg"), "a single recovered request carries no avg label")
 })
 
 test("the single-request token deltas match the response's own usage", () => {
@@ -104,9 +103,9 @@ test("the single-request token deltas match the response's own usage", () => {
 test("two real requests in one window fall back to the lifetime average, labelled", () => {
   // 3 - 1 = 2 new requests: recovery refuses, so this exercises the fallback
   // this fixture pair exists for.
-  const out = formatOmlxLine(afterTwo, afterOne).split("\n")
-  assert.equal(out[1], "70.9 tok/s (avg)", out.join(" | "))
-  assert.equal(out[2], "prefill 66 tok/s (avg)")
+  const rows = Object.fromEntries(omlxView(afterTwo, afterOne).rows)
+  assert.equal(rows.speed, "70.9 tok/s (avg)")
+  assert.equal(rows.prefill, "66 tok/s (avg)")
 })
 
 test("even in the fallback, the token counts are the window's own exact deltas", () => {
@@ -117,7 +116,7 @@ test("even in the fallback, the token counts are the window's own exact deltas",
   assert.equal(afterTwo.completion - afterOne.completion, wantCompletion)
   assert.equal(afterTwo.prompt - afterOne.prompt, wantPrompt)
   const out = formatOmlxLine(afterTwo, afterOne)
-  assert.ok(out.includes(`${wantCompletion} tok  (${wantPrompt} prompt)`), out)
+  assert.ok(out.includes(`tokens ${wantCompletion}`) && out.includes(`prompt ${wantPrompt}`), out)
 })
 
 // ---- synthetic edge cases: real data can't exercise these on demand --------
@@ -179,7 +178,7 @@ test("a multi-step turn uses OpenCode's generation rate, not the server's all-ti
 
 test("figures that include a same-engine sub-agent say so", () => {
   const out = formatOmlxLine(afterTwo, afterOne, 0.5, { decodeTokS: 42.5, total: 12.0, includesSubagents: true })
-  assert.ok(out.includes("12.00s incl. sub-agents"), out)
+  assert.ok(out.includes("incl. sub-agents"), out)
 })
 
 console.log(`\n${passed} passed`)

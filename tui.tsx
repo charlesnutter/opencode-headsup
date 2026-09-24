@@ -29,33 +29,34 @@ import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
 import type { HttpOptions } from "./http"
-import { universalLine, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
-import { record, formatHistory, formatCollapsedLine, latestFor, type History, type TurnRecord } from "./history"
-import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, type Panels } from "./panels"
-import { summariseSession, sessionHeading, sessionRows, rollupSubagents, formatSubagentLine } from "./session"
+import { universalView, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
+import { record, formatHistory, type History, type TurnRecord } from "./history"
+import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
+import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
+import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
 
-import { fetchMtplxLatest, formatMtplxLine, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
-import { fetchOmlxSample, formatOmlxLine, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
+import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
+import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
 import {
   fetchLlamaCppCounters,
   diffLlamaCppCounters,
-  formatLlamaCppLine,
+  llamaCppView,
   llamaCppIsThisTurn,
   type LlamaCppCounters,
 } from "./adapters/llamacpp"
-import { fetchMlxServeRequests, mlxServeTurn, formatMlxServeLine, combineMlxServeSteps, type MlxServeRequest } from "./adapters/mlxserve"
+import { fetchMlxServeRequests, mlxServeTurn, mlxServeView, combineMlxServeSteps, type MlxServeRequest } from "./adapters/mlxserve"
 import {
   fetchSplashSample,
   diffSplashSamples,
-  formatSplashLine,
+  splashView,
   splashIsThisTurn,
   type SplashSample,
 } from "./adapters/splash"
-import { fetchKoboldPerf, koboldTurn, formatKoboldLine, combineKoboldSteps, type KoboldPerf } from "./adapters/koboldcpp"
+import { fetchKoboldPerf, koboldTurn, koboldView, combineKoboldSteps, type KoboldPerf } from "./adapters/koboldcpp"
 import {
   fetchPromSample,
   diffPromSamples,
-  formatPromLine,
+  promView,
   VLLM_SPEC,
   SGLANG_SPEC,
   VLLM_MLX_SPEC,
@@ -123,7 +124,7 @@ function readConfig(options: Readonly<Record<string, unknown>>): Config {
     mlxServeKey: str(options["mlxServeApiKey"], "MLX_API_KEY", ""),
     display: {
       context: bool(options["showContext"], DEFAULT_DISPLAY.context),
-      sessionBackground: bool(options["sessionBackground"], DEFAULT_DISPLAY.sessionBackground),
+      background: bool(options["background"], DEFAULT_DISPLAY.background),
     },
   }
 }
@@ -212,6 +213,45 @@ export default Plugin.define({
       }).catch((e: unknown) => dbg(`ui write failed: ${String(e)}`))
     }
 
+    // One box. Theme colours throughout, so it follows the user's theme:
+    // bold heading, subdued labels and notes, default-coloured values.
+    const drawBox = (view: TurnView, suffix: string, open: boolean, toggle: () => void, first: boolean) => {
+      const subdued = ctx.theme.text.subdued
+      return (
+        <box
+          flexDirection="column"
+          marginLeft={1}
+          marginRight={1}
+          marginTop={first ? 0 : 1}
+          paddingLeft={1}
+          paddingRight={1}
+          paddingTop={open ? 1 : 0}
+          paddingBottom={open ? 1 : 0}
+          backgroundColor={cfg.display.background ? ctx.theme.background.surface.offset : undefined}
+        >
+          <text selectable={false} onMouseDown={toggle}>
+            <b>{`${open ? "▾" : "▸"} ${view.engine}${suffix}`}</b>
+            {!open && view.key ? <span style={{ fg: subdued }}>{`  ${view.key}`}</span> : null}
+          </text>
+          {open && (view.rows.length > 0 || view.notes.length > 0) ? (
+            <box flexDirection="column" marginTop={1}>
+              {view.rows.map(([label, value]) => (
+                <text selectable={false}>
+                  <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
+                  {value}
+                </text>
+              ))}
+              {view.notes.map((note) => (
+                <text selectable={false} fg={subdued}>
+                  {note}
+                </text>
+              ))}
+            </box>
+          ) : null}
+        </box>
+      )
+    }
+
     const show = (text: string, sessionID: string, key: string): void => {
       setPanel((d) => {
         const next = setLine(d, sessionID, text, key)
@@ -296,7 +336,7 @@ export default Plugin.define({
        * check expects the turn's tokens and steps plus theirs.
        */
       sameEngine?: TurnRecord["subagents"]
-    ): Promise<string | null> {
+    ): Promise<TurnView | null> {
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
       // host has the marks regardless of which tier renders the line. Passed
@@ -321,7 +361,7 @@ export default Plugin.define({
         spec: PromSpec,
         url: string,
         label: string
-      ): Promise<string | null> => {
+      ): Promise<TurnView | null> => {
         const now = await fetchPromSample(url, spec, http)
         if (!now) return null
         const prev = base.prom[id]
@@ -346,7 +386,7 @@ export default Plugin.define({
         // by the adapter, so adapters stay leaves.
         // The fallback rate is this turn's own generation: OpenCode's count
         // over its streaming, never the window's, which can include sub-agents.
-        const line = formatPromLine(diff, label, model, {
+        const line = promView(diff, label, model, {
           ...turnRate(hostTok, info, turn),
           tokens: windowTokens,
           steps: windowSteps,
@@ -402,7 +442,7 @@ export default Plugin.define({
             prefillTokS: combined.prefill_tok_s ?? undefined,
             mtpX: verifies > 0 && combined.completion_tokens ? combined.completion_tokens / verifies : undefined,
           }
-          return formatMtplxLine(combined, model, hostFigures)
+          return mtplxView(combined, hostFigures)
         }
 
         case "omlx": {
@@ -422,7 +462,7 @@ export default Plugin.define({
               return null
             }
           }
-          return formatOmlxLine(now, prev, hostTtft, {
+          return omlxView(now, prev, hostTtft, {
             ...hostFigures,
             decodeTokS: turnRate(hostTokens, info, turn).decodeTokS,
             includesSubagents,
@@ -454,7 +494,7 @@ export default Plugin.define({
             return null
           }
           tier2.engine = { prefillTokS: t.prefillTokS }
-          return formatLlamaCppLine(t, label, model, hostTtft, { ...hostFigures, includesSubagents })
+          return llamaCppView(t, label, hostTtft, { ...hostFigures, includesSubagents })
         }
 
         case "splash": {
@@ -476,7 +516,7 @@ export default Plugin.define({
             return null
           }
           tier2.engine = { prefillTokS: t.prefillTokS, draftAccept: t.draftAcceptRate }
-          return formatSplashLine(t, model, hostTtft, { ...hostFigures, steps: windowSteps, includesSubagents })
+          return splashView(t, hostTtft, { ...hostFigures, steps: windowSteps, includesSubagents })
         }
 
         case "koboldcpp":
@@ -499,7 +539,7 @@ export default Plugin.define({
               return null
             }
             tier2.engine = { prefillTokS: combined.prefillTokS, draftAccept: combined.draftAcceptRate }
-            return formatKoboldLine(combined, model, hostTtft, hostFigures)
+            return koboldView(combined, hostTtft, hostFigures)
           }
           // No per-step reads: one read now, which can only describe the
           // last request -- labelled as such when several landed.
@@ -511,7 +551,7 @@ export default Plugin.define({
           })
           const t = koboldTurn(perf, prev)
           if (t) match(t.completionTokens, `; generations ${t.generationsInWindow ?? "?"}`)
-          return t ? formatKoboldLine(t, model, hostTtft) : null
+          return t ? koboldView(t, hostTtft, hostFigures) : null
         }
 
         case "mlxserve":
@@ -531,7 +571,7 @@ export default Plugin.define({
             setBase((d) => {
               d.mlxServeId[cfg.mlxServeBase] = combined.requestId
             })
-            return formatMlxServeLine(combined, model, hostFigures)
+            return mlxServeView(combined, hostFigures)
           }
           const recs = await fetchMlxServeRequests(
             cfg.mlxServeBase,
@@ -546,7 +586,7 @@ export default Plugin.define({
           setBase((d) => {
             d.mlxServeId[cfg.mlxServeBase] = t.requestId
           })
-          return formatMlxServeLine(t, model)
+          return mlxServeView(t, hostFigures)
         }
 
         case "vllm":
@@ -634,7 +674,7 @@ export default Plugin.define({
         // A model or provider switch replaces this session's line rather than
         // blending two engines' figures into one reading. Per session, so a
         // different model in another tab is not a switch here.
-        show(`${provider}  ${short(model)}\n…`, sessionID, key)
+        show(encodeView({ engine: provider, rows: [], notes: ["…"] }), sessionID, key)
       }
 
       // One signal for every fetch this turn. Each request still gets its own
@@ -676,7 +716,7 @@ export default Plugin.define({
         pendingBaseline: false,
         sharedWindow: false,
       }
-      let line: string | null = null
+      let line: TurnView | null = null
       try {
         line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
         // Recorded before the fallback overwrites it, so history knows which
@@ -691,9 +731,8 @@ export default Plugin.define({
       }
       const enriched = line !== null
       if (!line) {
-        line = universalLine(
+        line = universalView(
           provider,
-          model,
           info,
           turn,
           cfg.display,
@@ -702,12 +741,12 @@ export default Plugin.define({
         // Say why this turn looks different from the next one. The figures
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
-        // magnitude when it does.
-        if (tier2.pendingBaseline) line += "\nengine telemetry from the next turn"
-        else if (tier2.sharedWindow) line += "\nengine data skipped: overlapping requests"
+        // magnitude when it does. Split to fit the box's 34 cells.
+        if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
+        else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
       }
 
-      if (subagents) line += `\n${formatSubagentLine(subagents)}`
+      if (subagents) line.rows.push(...subagentRows(subagents))
 
       // Keep the turn for the drill-down. Every figure below is OpenCode's own,
       // whatever tier drew the sidebar line; `source` records only which tier
@@ -760,7 +799,7 @@ export default Plugin.define({
         dbg(`report ${seq} for ${sessionID} superseded, not rendering`)
         return
       }
-      show(line, sessionID, key)
+      show(encodeView(line), sessionID, key)
     }
 
     // ---- subscriptions ------------------------------------------------------
@@ -1027,46 +1066,22 @@ export default Plugin.define({
             // highlight) instead of just toggling. This is a footer we
             // render, not a passage a user would want to copy, so turning
             // selection off is the right default rather than a workaround.
-            if (ui.collapsed) {
-              return (
-                <text selectable={false} onMouseDown={() => toggleCollapsed()}>
-                  {formatCollapsedLine(latestFor(history.turns, input.sessionID), input.sessionID)}
-                </text>
-              )
-            }
-            // The per-turn block keeps OpenCode's own sidebar style: its first
-            // line (engine and model) bold as a title, the figures below.
-            const [title, ...figures] = lineFor(panel, input.sessionID).split("\n")
-            // The Session section: below the per-turn block, collapsed by
-            // default, set apart by a blank line, a bold clickable heading
-            // and subdued label/value rows -- so the two never read as one
-            // list. Absent until the session has a recorded turn.
+            // Two independent boxes, each opened and closed by its heading:
+            // the last turn, and the session. Laid out as labelled rows, one
+            // figure per line, inside a 1-cell margin and 1-cell / 1-row
+            // padding on the theme's offset shade -- so they read as this
+            // plugin's own blocks, not as more lines of OpenCode's sidebar.
+            // The heading names the engine only: the model is already shown
+            // under the prompt box.
+            const stored = lineFor(panel, input.sessionID)
+            const turnView: TurnView =
+              stored === PLACEHOLDER ? { engine: "last turn", rows: [], notes: ["no turn yet"] } : decodeView(stored)
+            const suffix = stored === PLACEHOLDER ? "" : " · last turn"
             const summary = summariseSession(history.turns, input.sessionID)
-            const open = ui.sessionOpen === true
             return (
               <box flexDirection="column">
-                <text selectable={false} onMouseDown={() => toggleCollapsed()}>
-                  <b>{title}</b>
-                  {figures.length > 0 ? `\n${figures.join("\n")}` : ""}
-                </text>
-                {summary ? (
-                  <box
-                    flexDirection="column"
-                    marginTop={1}
-                    backgroundColor={cfg.display.sessionBackground ? ctx.theme.background.surface.offset : undefined}
-                  >
-                    <text selectable={false} onMouseDown={() => toggleSession()}>
-                      <b>{sessionHeading(summary, open)}</b>
-                    </text>
-                    {open ? (
-                      <text selectable={false} fg={ctx.theme.text.subdued}>
-                        {sessionRows(summary)
-                          .map(([label, value]) => `  ${label.padEnd(11)}${value}`)
-                          .join("\n")}
-                      </text>
-                    ) : null}
-                  </box>
-                ) : null}
+                {drawBox(turnView, suffix, !ui.collapsed, toggleCollapsed, true)}
+                {summary ? drawBox(sessionView(summary), "", ui.sessionOpen === true, toggleSession, false) : null}
               </box>
             )
           },

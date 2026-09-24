@@ -178,7 +178,9 @@ test("KoboldCpp: renders a note when several generations landed in one window", 
   const after = parseKoboldPerf(raw("koboldcpp-multigen-after.json"))
   const t = koboldTurn(after, before.total_gens)
   const out = formatKoboldLine(t, "qwen2.5-0.5b-instruct-q4_k_m")
-  assert.ok(out.includes("2 generations this turn (last shown only)"), out)
+  // A full-width note, split to fit the sidebar: 2 generations this turn,
+  // last shown only.
+  assert.ok(out.includes("2 generations this turn\n(last shown only)"), out)
 })
 
 test("KoboldCpp: a normal single-generation turn carries no such note", () => {
@@ -234,7 +236,7 @@ test("KoboldCpp steps: nothing is dropped, so no 'last shown only' note", () => 
   const t = combineKoboldSteps([{ perf: stepA, hostTokens: 40 }, { perf: stepB, hostTokens: 83 }])
   const out = formatKoboldLine(t, "m", 0.4, { total: 9.5, retries: 0 })
   assert.ok(!out.includes("last shown only"), out)
-  assert.ok(out.includes("123 tok  9.50s"), `OpenCode's total, not the engine's phases:\n${out}`)
+  assert.ok(out.includes("tokens 123\ntime 9.50s"), `OpenCode's total, not the engine's phases:\n${out}`)
 })
 
 console.log(`\n${passed} passed`)

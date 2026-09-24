@@ -22,10 +22,17 @@
   turn's requests and tokens plus the sub-agents'. Those figures then cover
   both, and the line says `incl. sub-agents`. Rate and TTFT stay the turn's
   own. Built and tested against captures; not yet run live.
-- `sessionBackground` option: the theme's offset shade behind the Session
-  section.
+- `background` option (default on): the theme's offset shade behind each
+  box.
 
 ### Changed
+- The sidebar is two boxes, the last turn and the session, each opened and
+  closed independently by clicking its heading. Figures are laid out one
+  per line as label and value; a figure with parts continues on the next
+  line. Collapsed, a heading keeps one figure. The heading names the
+  engine, not the model, which OpenCode already shows under the prompt.
+- mlx-serve no longer shows a non-streamed request's whole-request rate:
+  it includes prefill, so it is not generation speed.
 - `mtplx`, `koboldcpp` and `mlxserve` are read when each step finishes
   streaming, not when OpenCode marks the step ended. For a step that calls
   tools, "ended" comes only after the tools have run, and a sub-agent on the
@@ -33,8 +40,6 @@
   declined with `engine data skipped: overlapping requests`. Measured on
   MTPLX: 194 tokens (the step's own) at the end of streaming, 163 (the
   sub-agent's) at "ended".
-- The per-turn block's first line (engine and model) is bold, matching
-  OpenCode's own sidebar sections.
 
 ## [0.2.4] – 2026-09-23
 ### Changed

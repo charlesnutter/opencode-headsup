@@ -22,7 +22,8 @@
 // No JSX/solid-js imports, so it stays unit-testable (test/mlxserve.test.mjs).
 
 import { httpJson, type HttpOptions } from "../http"
-import { nn, ni, short } from "../format"
+import { nn, ni } from "../format"
+import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
 
 /** One record from /v1/metrics/requests, as the server names its fields. */
 export interface MlxServeRequest {
@@ -272,35 +273,38 @@ export function combineMlxServeSteps(
 }
 
 /**
- * `host.total` is the turn's total from OpenCode -- what the user waited,
- * retries included -- and wins over the record's request duration.
+ * The turn as labelled rows. `host.total` is the turn's total from OpenCode
+ * -- what the user waited, retries included -- and wins over the record's
+ * request duration. Only a streamed record's rate is shown: a non-streamed
+ * record's `tokens_per_second` is completion / whole duration, prefill
+ * included, which is not generation speed (OpenCode always streams).
  */
+export function mlxServeView(
+  t: MlxServeTurn,
+  host: { total?: number; retries?: number } = {}
+): TurnView {
+  const rows: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("ttft", [t.decodeTokS !== undefined && t.ttft !== undefined ? `${nn(t.ttft, 2)}s` : ""]),
+    ["tokens", nt(t.completionTokens)],
+    ...rowsOf("prompt", [t.promptTokens !== undefined ? nt(t.promptTokens) : ""]),
+    ...timeRows(host.total ?? t.totalS, host.retries),
+  ]
+  const notes: string[] = []
+  // A cold start loaded the model mid-request; without this the turn reads
+  // as a tenfold slowdown rather than a one-off load.
+  if (t.coldStart) notes.push("cold start (model loaded)")
+  if (t.requests > 1 && t.steps === undefined) notes.push(`${ni(t.requests)} requests this turn`)
+  return { engine: "mlx-serve", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+}
+
+/** The view as text; kept for tests that look for a figure. */
 export function formatMlxServeLine(
   t: MlxServeTurn,
-  model: string,
+  _model: string,
   host: { total?: number; retries?: number } = {}
 ): string {
-  // decodeTokS and overallTokS are never both set; they are not comparable,
-  // so the whole-request one is labelled rather than shown as a decode rate.
-  const rate =
-    t.decodeTokS !== undefined
-      ? `${nn(t.decodeTokS)} tok/s${t.ttft !== undefined ? `  ttft ${nn(t.ttft, 2)}s` : ""}`
-      : t.overallTokS !== undefined
-        ? `${nn(t.overallTokS)} tok/s (whole request)`
-        : ""
-  return [
-    `mlx-serve  ${short(model)}`,
-    rate,
-    `${ni(t.completionTokens)} tok${t.promptTokens !== undefined ? `  ${ni(t.promptTokens)} prompt` : ""}  ${nn(host.total ?? t.totalS, 2)}s${
-      (host.retries ?? 0) > 0 ? ` (${host.retries} ${host.retries === 1 ? "retry" : "retries"})` : ""
-    }`,
-    // A cold start loaded the model mid-request; without this the turn reads
-    // as a tenfold slowdown rather than a one-off load.
-    t.coldStart ? "cold start (model loaded)" : "",
-    t.requests > 1 && t.steps === undefined ? `${ni(t.requests)} requests this turn` : "",
-  ]
-    .filter(Boolean)
-    .join("\n")
+  return viewText(mlxServeView(t, host))
 }
 
 export async function fetchMlxServeRequests(
