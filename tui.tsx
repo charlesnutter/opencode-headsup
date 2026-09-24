@@ -265,8 +265,11 @@ export default Plugin.define({
           marginLeft={1}
           marginRight={1}
           marginTop={first ? 0 : 1}
-          paddingLeft={1}
-          paddingRight={1}
+          // 2 columns at the sides against 1 row top and bottom: a terminal
+          // cell is about twice as tall as it is wide, so this reads as even
+          // padding all round (chosen from the mockup, option A).
+          paddingLeft={2}
+          paddingRight={2}
           paddingTop={open ? 1 : 0}
           paddingBottom={open ? 1 : 0}
           backgroundColor={cfg.display.background ? panelColor() : undefined}

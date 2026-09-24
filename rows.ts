@@ -4,7 +4,7 @@
 // a TurnView; the entry file draws it into a box. A value with parts
 // continues on the next row under an empty label, so every row fits the
 // sidebar's 38 columns: a 12-cell label column inside a box with a 1-cell
-// margin and 1-cell padding leaves 22 cells for the value.
+// margin and 2-cell side padding leaves 20 cells for the value.
 
 /** A label and its value. An empty label continues the row above. */
 export type Row = readonly [label: string, value: string]

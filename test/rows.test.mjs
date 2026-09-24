@@ -24,12 +24,12 @@ test("empty parts leave no rows", () => {
   assert.deepEqual(rowsOf("time", []), [])
 })
 
-test("rows fit the sidebar: 12-cell labels, and a 34-cell box interior", () => {
-  // 38 columns, less a 1-cell margin and 1-cell padding each side.
+test("rows fit the sidebar: 12-cell labels, and a 32-cell box interior", () => {
+  // 38 columns, less a 1-cell margin and 2-cell padding each side.
   const lines = rowLines([["sub-agents", "1 · 191 tok"], ["", "23.91s"]])
   assert.equal(lines[0], "sub-agents  1 · 191 tok")
   assert.equal(lines[1], " ".repeat(LABEL_WIDTH) + "23.91s")
-  lines.forEach((l) => assert.ok(l.length <= 34, l))
+  lines.forEach((l) => assert.ok(l.length <= 32, l))
 })
 
 test("numbers carry thousands separators", () => {

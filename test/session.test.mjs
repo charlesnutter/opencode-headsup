@@ -141,13 +141,13 @@ test("one turn is singular", () => {
   assert.equal(sessionView(summariseSession([row()], SID)).engine, "Session · 1 turn")
 })
 
-test("every row fits the box's 34 cells", () => {
+test("every row fits the box's 32 cells", () => {
   const s = summariseSession(
     [row({ ttft: 0.5, retries: 2, engine: { mtpX: 3.4, prefillTokS: 449, draftAccept: 0.7 },
       subagents: { count: 2, tokens: 12345, spanS: 30, cost: 0.012 } }), row({ ttft: 17.6 })],
     SID
   )
-  rowsOfView(s).forEach(([l, v]) => assert.ok(12 + v.length <= 34, `${l}: ${v}`))
+  rowsOfView(s).forEach(([l, v]) => assert.ok(12 + v.length <= 32, `${l}: ${v}`))
 })
 
 test("rows are label/value pairs, and an absent figure leaves no row", () => {
