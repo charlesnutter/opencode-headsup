@@ -228,10 +228,15 @@ export default Plugin.define({
       return undefined
     }
     type Color = Parameters<typeof ctx.theme.increase>[0]
+    // Measured on OpenCode 2.0.12: text is {base, muted, ...}; `muted` is
+    // the grey. `subdued` is what the installed types declare.
     const subduedColor = (): Color | undefined =>
-      themeColor("text.subdued", "text.muted", "textMuted", "text.subtle") as Color | undefined
+      themeColor("text.muted", "text.subdued", "textMuted") as Color | undefined
     const panelColor = (): Color | undefined =>
-      themeColor("background.surface.offset", "background.raised.base", "backgroundPanel", "backgroundElement") as
+      // Measured on OpenCode 2.0.12: background is {base, raised:{base, high,
+      // max}}. raised.base is the sidebar's own colour (the boxes rendered
+      // unshaded on it), so the box takes the next step up.
+      themeColor("background.raised.high", "background.surface.offset", "backgroundElement", "backgroundPanel") as
         | Color
         | undefined
     if (HUD_DEBUG) {
