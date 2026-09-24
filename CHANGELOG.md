@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.3.0] – 2026-09-23
 ### Added
 - A **Session** section below the per-turn figures, collapsed by default:
   click its heading to open it. Collapsed, it still shows the session's

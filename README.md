@@ -66,17 +66,18 @@ Equivalent, if you keep your config in version control:
 
 | Key | Does |
 | --- | --- |
-| `ctrl+shift+m` | Collapse/expand the sidebar line. Clicking the line does the same. |
+| `ctrl+shift+m` | Collapse/expand the last-turn box. Clicking its heading does the same. |
 | `ctrl+shift+h` | Open/close the per-turn history panel. |
 
 Both are registered with stable command ids (`headsup.toggle`,
 `headsup.panel`), so they can be remapped from your own OpenCode keybind
 config and are reachable from the command palette.
 
-Collapsed, the line keeps one figure rather than becoming a bare label:
+The Session box has no key; click its heading. Collapsed, each box keeps
+one figure rather than becoming a bare label:
 
 ```
-▸ view metrics  ·  38.1 tok/s
+▸ MTPLX · last turn  34.4 tok/s
 ```
 
 ## Configuration
@@ -458,7 +459,6 @@ counter shows nothing rather than `0% accepted`.
 
 ## Roadmap
 
-- Session-level metrics
 - Zen/Go quota (`opencode.ai/zen/go/v1/usage`) — opt-in, needs a
   `PRIVACY.md`
 
