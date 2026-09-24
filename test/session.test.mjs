@@ -115,7 +115,7 @@ test("retries are summed", () => {
 })
 
 // Row values in the mockup: one figure per line, a value with parts
-// continuing under an empty label, every row within the box's 34 cells.
+// continuing under an empty label, every row within the box's 32 cells.
 const rowsOfView = (s) => sessionView(s).rows
 const labelled = (s) => Object.fromEntries(rowsOfView(s).filter(([l]) => l))
 const continuation = (s, label) => {

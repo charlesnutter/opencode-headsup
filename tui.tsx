@@ -786,7 +786,7 @@ export default Plugin.define({
         // Say why this turn looks different from the next one. The figures
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
-        // magnitude when it does. Split to fit the box's 34 cells.
+        // magnitude when it does. Split to fit the box's 32 cells.
         if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
         else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
       }
