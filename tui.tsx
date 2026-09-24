@@ -1144,18 +1144,11 @@ export default Plugin.define({
         ctx.ui.slot({
           append: "session.panel",
           render: (input) =>
-            // A line per row, unwrapped and cut at the panel's edge rather
-            // than wrapped onto a line of its own; widening the panel brings
-            // the cut figures back. No width is guessed.
-            input.name === PANEL_NAME ? (
-              <box flexDirection="column">
-                {historyLines(history.turns).map((l) => (
-                  <text wrapMode="none" truncate>
-                    {l || " "}
-                  </text>
-                ))}
-              </box>
-            ) : null,
+            // One text, wrapped by the host. A line per row with
+            // wrapMode="none" and truncate was tried (OpenCode 2.0.12): it
+            // cut rows in the middle with "..." and left stale cells from
+            // earlier frames on resize, so rows read as garbage.
+            input.name === PANEL_NAME ? <text>{historyLines(history.turns).join("\n")}</text> : null,
         })
       )
     } catch (e: unknown) {
