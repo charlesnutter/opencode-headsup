@@ -270,8 +270,8 @@ export default Plugin.define({
           // padding all round (chosen from the mockup, option A).
           paddingLeft={2}
           paddingRight={2}
-          paddingTop={open ? 1 : 0}
-          paddingBottom={open ? 1 : 0}
+          paddingTop={1}
+          paddingBottom={1}
           backgroundColor={cfg.display.background ? panelColor() : undefined}
         >
           <text selectable={false} onMouseDown={toggle}>
