@@ -54,21 +54,28 @@ test("the default cap is a real number, not undefined", () => {
 })
 
 // ---- summarising: the part that must not lie --------------------------------
-test("a whole-turn rate is excluded from the mean decode rate", () => {
-  // This is the whole reason rateWindow is carried per row. Averaging 38.1
-  // (over a 0.97s decode window) with 3.7 (over the same turn's 10.03s
-  // total) produces a number that describes neither.
-  const s = summarise([
-    turn({ rate: 38.1, rateWindow: "decode" }),
-    turn({ rate: 3.7, rateWindow: "whole" }),
-    turn({ rate: 38.7, rateWindow: "decode" }),
-  ])
-  assert.ok(Math.abs(s.meanDecodeTokS - 38.4) < 0.05, String(s.meanDecodeTokS))
+test("the summary rate is tokens over streaming time, not a mean of rates", () => {
+  // 100 tok over 2s and 300 tok over 3s: 400 / 5 = 80, not the mean of 50 and 100.
+  const s = summarise([turn({ tokens: 300, streamS: 3 }), turn({ tokens: 100, streamS: 2 })])
+  assert.equal(s.genTokS, 80)
 })
 
-test("no decode rates at all means no mean, not zero", () => {
+test("a whole-turn rate never counts as generation", () => {
+  // Averaging 38.1 over a decode window with 3.7 over the whole turn
+  // produces a number that describes neither.
+  const s = summarise([turn({ rate: 38.1, tokens: 381 }), turn({ rate: 3.7, rateWindow: "whole", tokens: 1000 })])
+  assert.ok(Math.abs(s.genTokS - 38.1) < 1e-9, String(s.genTokS))
+})
+
+test("the summary rate is the newest turn's model only, and names it", () => {
+  const s = summarise([turn({ model: "a", tokens: 100, streamS: 1 }), turn({ model: "b", tokens: 10, streamS: 1 })])
+  assert.equal(s.genTokS, 100)
+  assert.equal(s.genModel, "a")
+})
+
+test("no generation window at all means no rate, not zero", () => {
   const s = summarise([turn({ rate: 3.7, rateWindow: "whole" }), turn({ rate: undefined })])
-  assert.equal(s.meanDecodeTokS, undefined)
+  assert.equal(s.genTokS, undefined)
 })
 
 test("cost sums across turns, and is absent when nothing cost anything", () => {

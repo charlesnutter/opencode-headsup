@@ -30,7 +30,7 @@ import { appendFileSync } from "node:fs"
 import { short } from "./format"
 import type { HttpOptions } from "./http"
 import { universalView, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
-import { record, formatHistory, type History, type TurnRecord } from "./history"
+import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
 import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
@@ -1144,7 +1144,18 @@ export default Plugin.define({
         ctx.ui.slot({
           append: "session.panel",
           render: (input) =>
-            input.name === PANEL_NAME ? <text>{formatHistory(history.turns)}</text> : null,
+            // A line per row, unwrapped and cut at the panel's edge rather
+            // than wrapped onto a line of its own; widening the panel brings
+            // the cut figures back. No width is guessed.
+            input.name === PANEL_NAME ? (
+              <box flexDirection="column">
+                {historyLines(history.turns).map((l) => (
+                  <text wrapMode="none" truncate>
+                    {l || " "}
+                  </text>
+                ))}
+              </box>
+            ) : null,
         })
       )
     } catch (e: unknown) {

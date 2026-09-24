@@ -40,6 +40,12 @@
   declined with `engine data skipped: overlapping requests`. Measured on
   MTPLX: 194 tokens (the step's own) at the end of streaming, 163 (the
   sub-agent's) at "ended".
+- The history panel no longer wraps a long row onto a second line. Each row
+  is cut at the panel's edge, the least important figures last, and
+  widening the panel brings them back.
+- The history panel's headline rate is generation tok/s on the newest
+  turn's model (tokens over streaming time, as in the Session box), instead
+  of a mean of per-turn rates across every model.
 
 ## [0.2.4] – 2026-09-23
 ### Changed

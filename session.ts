@@ -15,7 +15,7 @@
 // and $ spent, so those are deliberately not repeated here.
 
 import { nn, ni, short, money } from "./format"
-import type { TurnRecord } from "./history"
+import { streamOf, type TurnRecord } from "./history"
 import { rowsOf, nt, type Row, type TurnView } from "./rows"
 
 /** Recent turns shown in the generation trend. */
@@ -97,15 +97,6 @@ export function subagentRows(r: SubagentRollup): Row[] {
     `${nn(r.spanS, 2)}s`,
     money(r.cost),
   ])
-}
-
-/** A turn's streaming time: recorded, or derived from an older row's rate. */
-function streamOf(t: TurnRecord): number | undefined {
-  if (t.streamS !== undefined && t.streamS > 0) return t.streamS
-  // Rows recorded before streamS existed carry a generation rate whose
-  // window is tokens / rate. A whole-turn rate is not generation, so no.
-  if (t.rate !== undefined && t.rate > 0 && t.rateWindow !== "whole") return t.tokens / t.rate
-  return undefined
 }
 
 const mean = (xs: number[]): number | undefined =>

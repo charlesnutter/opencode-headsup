@@ -108,20 +108,35 @@ export interface Summary {
   tokens: number
   /** Total cost, or undefined when no turn in the window had one at all. */
   cost?: number
-  /** Mean of the per-turn decode rates — whole-turn rates are excluded,
-   *  because averaging the two together would compare different windows. */
-  meanDecodeTokS?: number
+  /**
+   * Generation tok/s on the newest turn's model: its turns' tokens over
+   * their streaming time, the Session box's rule. Never a mean of per-turn
+   * rates, never a whole-turn rate, and never across two models.
+   */
+  genTokS?: number
+  /** The model `genTokS` is for. */
+  genModel?: string
   /** How many rows came from an engine rather than from the host. */
   engineRows: number
+}
+
+/** A turn's streaming time: recorded, or derived from an older row's rate. */
+export function streamOf(t: TurnRecord): number | undefined {
+  if (t.streamS !== undefined && t.streamS > 0) return t.streamS
+  // Rows recorded before streamS existed carry a generation rate whose
+  // window is tokens / rate. A whole-turn rate is not generation, so no.
+  if (t.rate !== undefined && t.rate > 0 && t.rateWindow !== "whole") return t.tokens / t.rate
+  return undefined
 }
 
 export function summarise(turns: readonly TurnRecord[]): Summary {
   let tokens = 0
   let cost = 0
   let sawCost = false
-  let rateSum = 0
-  let rateCount = 0
+  let genTokens = 0
+  let streamS = 0
   let engineRows = 0
+  const model = turns[0]?.model
 
   for (const t of turns) {
     tokens += t.tokens
@@ -129,11 +144,10 @@ export function summarise(turns: readonly TurnRecord[]): Summary {
       cost += t.cost
       sawCost = true
     }
-    // Only decode rates. Mixing in a whole-turn rate would average two
-    // different measurements into one meaningless number.
-    if (t.rate !== undefined && t.rateWindow !== "whole") {
-      rateSum += t.rate
-      rateCount++
+    const s = streamOf(t)
+    if (t.model === model && s !== undefined) {
+      genTokens += t.tokens
+      streamS += s
     }
     if (t.source === "engine") engineRows++
   }
@@ -142,7 +156,8 @@ export function summarise(turns: readonly TurnRecord[]): Summary {
     turns: turns.length,
     tokens,
     cost: sawCost ? cost : undefined,
-    meanDecodeTokS: rateCount > 0 ? rateSum / rateCount : undefined,
+    genTokS: streamS > 0 ? genTokens / streamS : undefined,
+    genModel: streamS > 0 ? model : undefined,
     engineRows,
   }
 }
@@ -209,7 +224,9 @@ export function formatCollapsedLine(
 }
 
 /**
- * The whole panel body: a summary, then the rows.
+ * The whole panel body, one entry per line: a summary, then the rows. Each
+ * line is drawn unwrapped and cut at the panel's edge, so a row's figures run
+ * most important first -- what a narrow panel loses is the tail.
  *
  * `*` marks a row whose sidebar line came from the serving engine's own
  * metrics. The row itself is OpenCode's figures either way, which the legend
@@ -217,15 +234,15 @@ export function formatCollapsedLine(
  * The legend is only printed when the distinction actually appears in the
  * window, because a legend for something absent is noise.
  */
-export function formatHistory(turns: readonly TurnRecord[], modelWidth = 18): string {
+export function historyLines(turns: readonly TurnRecord[], modelWidth = 18): string[] {
   if (turns.length === 0) {
-    return "No turns recorded yet."
+    return ["No turns recorded yet."]
   }
   const s = summarise(turns)
   const head = [
     `${ni(s.turns)} turns`,
     `${ni(s.tokens)} tok`,
-    s.meanDecodeTokS !== undefined ? `${nn(s.meanDecodeTokS)} tok/s mean` : "",
+    s.genTokS !== undefined ? `${nn(s.genTokS)} tok/s avg ${short(s.genModel ?? "", modelWidth)}` : "",
     money(s.cost),
   ]
     .filter(Boolean)
@@ -234,5 +251,9 @@ export function formatHistory(turns: readonly TurnRecord[], modelWidth = 18): st
   const rows = turns.map((t) => formatRow(t, modelWidth))
   const mixed = s.engineRows > 0 && s.engineRows < turns.length
   const legend = mixed ? ["", "* sidebar used engine telemetry; rows are OpenCode's figures"] : []
-  return [head, "", ...rows, ...legend].join("\n")
+  return [head, "", ...rows, ...legend]
+}
+
+export function formatHistory(turns: readonly TurnRecord[], modelWidth = 18): string {
+  return historyLines(turns, modelWidth).join("\n")
 }
