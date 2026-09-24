@@ -1,3 +1,13 @@
+## [Unreleased]
+### Changed
+- The first turn after OpenCode starts can show engine figures on
+  `vllm`, `sglang`, `vllmmlx`, `aphrodite`, `lmdeploy`, `llamacpp`,
+  `llamafile`, `splash` and `omlx`, instead of `engine telemetry from the
+  next turn`. When a turn starts on one of these engines with no reading
+  yet, that one engine is read once. Nothing is read at startup, and no
+  other engine is read. A new session that has not used or selected a
+  model yet is not primed, as before.
+
 ## [0.3.0] – 2026-09-23
 ### Added
 - A **Session** section below the per-turn figures, collapsed by default:
