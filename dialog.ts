@@ -609,3 +609,24 @@ export function spaced(lines: readonly Line[], spacing: Spacing): Line[] {
   })
   return out
 }
+
+/**
+ * Indents everything under a section heading by two cells, so figures sit in
+ * from their titles as the time bar does. Headings keep the full width; lines
+ * already indented (the time bar, charts, tables) stay where they are. Lay the
+ * body out at `w - 2` before indenting it.
+ */
+export function indentBody(lines: readonly Line[], w: number): Line[] {
+  return lines.map((l) => {
+    if (l.length === 0) return l
+    if (isHeading(l)) {
+      // Headings were laid out 2 cells narrower with the body; widen the rule back.
+      const i = l.findIndex(([t, st]) => st === "rule" && t.startsWith("─"))
+      if (i < 0) return l
+      const out = [...l]
+      out[i] = ["─".repeat((l[i] as Seg)[0].length + (w - width(l))), "rule"]
+      return out
+    }
+    return /^ {2}/.test(l[0]?.[0] ?? "") ? l : [["  ", ""], ...l]
+  })
+}
