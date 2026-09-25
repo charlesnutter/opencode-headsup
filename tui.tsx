@@ -550,6 +550,8 @@ export default Plugin.define({
         engine?: TurnRecord["engine"]
         /** Each step's own engine reading, where the engine is read per step. */
         stepEngine?: TurnDetail["stepEngine"]
+        /** A counter engine's reading at the turn's end. */
+        endSample?: unknown
       },
       /** The turn's assistant messages, one per step, oldest first. */
       steps: readonly SessionMessageAssistant[],
@@ -560,7 +562,13 @@ export default Plugin.define({
        */
       sameEngine?: TurnRecord["subagents"],
       /** Compactions in the turn, each bracketed by counter readings. */
-      bracketed: readonly Compaction[] = []
+      bracketed: readonly Compaction[] = [],
+      /**
+       * This turn's own starting reading of a counter engine, taken when the
+       * turn started. Preferred to the engine-wide baseline, which another
+       * session's report -- a sub-agent's, on the same engine -- moves.
+       */
+      startSample?: unknown
     ): Promise<TurnView | null> {
       // Readings around each compaction on this engine, to take its request
       // back out of a counter window.
@@ -595,7 +603,8 @@ export default Plugin.define({
       ): Promise<TurnView | null> => {
         const now = await fetchPromSample(url, spec, http)
         if (!now) return null
-        const base0 = base.prom[id]
+        tier2.endSample = now
+        const base0 = (startSample as PromSample | undefined) ?? base.prom[id]
         const prev = base0 ? shiftBaseline(base0, bracketsFor<PromSample>()) : base0
         setBase((d) => {
           d.prom[id] = now
@@ -719,7 +728,8 @@ export default Plugin.define({
           const label = provider === "llamacpp" ? "llama.cpp" : "llamafile"
           const now = await fetchLlamaCppCounters(url, http)
           if (!now) return null // unreachable, or started without --metrics
-          const base0 = base.llamacpp[provider]
+          tier2.endSample = now
+          const base0 = (startSample as LlamaCppCounters | undefined) ?? base.llamacpp[provider]
           const prev = base0 ? shiftBaseline(base0, bracketsFor<LlamaCppCounters>()) : base0
           setBase((d) => {
             d.llamacpp[provider] = now
@@ -742,7 +752,8 @@ export default Plugin.define({
         case "splash": {
           const now = await fetchSplashSample(cfg.splashBase, http)
           if (!now) return null
-          const base0 = base.splash[cfg.splashBase]
+          tier2.endSample = now
+          const base0 = (startSample as SplashSample | undefined) ?? base.splash[cfg.splashBase]
           const prev = base0 ? shiftBaseline(base0, bracketsFor<SplashSample>()) : base0
           setBase((d) => {
             d.splash[cfg.splashBase] = now
@@ -1008,6 +1019,12 @@ export default Plugin.define({
       after?: unknown
     }
     const compactions = new Map<string, Compaction[]>()
+    // Each session's reading of its counter engine when its current turn
+    // started. The engine-wide baseline alone can't bracket a turn: a
+    // sub-agent on the same engine reports first, moving it to after the
+    // sub-agent, and the parent's window then held only its last step
+    // (found by the end-to-end suite; live, it read as "overlapping requests").
+    const turnStart = new Map<string, { provider: string; sample: unknown }>()
     const compactionsOverlapping = (sessionID: string, from: number, to: number): Compaction[] =>
       (compactions.get(sessionID) ?? []).filter((c) => (c.end ?? to) > from && c.start < to)
     const compactionsIn = (sessionID: string, from: number, to: number): Array<readonly [number, number]> =>
@@ -1144,6 +1161,7 @@ export default Plugin.define({
         sharedWindow: boolean
         engine?: TurnRecord["engine"]
         stepEngine?: TurnDetail["stepEngine"]
+        endSample?: unknown
       } = {
         pendingBaseline: false,
         sharedWindow: false,
@@ -1154,7 +1172,14 @@ export default Plugin.define({
         // no reading of it to check against: OpenCode's figures only.
         const bracketed = compactionsOverlapping(sessionID, info.time.created, Date.now())
         if (bracketed.some((c) => c.before && c.after)) dbg(`  taking ${bracketed.length} compaction(s) out of the window`)
-        if (!opts.outcome) line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine, bracketed)
+        const start = turnStart.get(sessionID)
+        const startSample = start?.provider === provider ? start.sample : undefined
+        if (!opts.outcome) {
+          line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine, bracketed, startSample)
+        }
+        // The end of this reply starts the next one in the same execution.
+        if (tier2.endSample) turnStart.set(sessionID, { provider, sample: tier2.endSample })
+        else turnStart.delete(sessionID)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -1368,6 +1393,19 @@ export default Plugin.define({
           const m = selectedModel.get(sid) ?? lastModel(ctx.data.session.message.list(sid) ?? [])
           dbg(`prime lookup ${sid}: ${m ? `${m.providerID}/${m.id}` : "no model known"}`)
           if (m) void prime(m.providerID)
+          const read = m ? readCounters(m.providerID) : undefined
+          turnStart.delete(sid)
+          if (m && read) {
+            read
+              .then((sample) => {
+                if (sample) turnStart.set(sid, { provider: m.providerID, sample })
+                if (turnStart.size > 64) {
+                  const oldest = turnStart.keys().next().value
+                  if (oldest !== undefined && oldest !== sid) turnStart.delete(oldest)
+                }
+              })
+              .catch(() => {})
+          }
         })
       )
       off.push(
