@@ -45,6 +45,8 @@ import {
   dur,
   TABS,
   CONTENT_WIDTH,
+  spaced,
+  type Spacing,
   type Line,
   type Style,
   type Tab,
@@ -176,6 +178,12 @@ interface UiState {
 }
 
 // ---- entry ------------------------------------------------------------------
+
+/**
+ * Blank rows in the details dialog: "tight" as the approved mockup, or a row
+ * under each heading, or under each bar (see dialog.ts).
+ */
+const DIALOG_SPACING: Spacing = "tight"
 
 /** Identifies this plugin's panel among any others contributed to the slot. */
 const PANEL_NAME = "headsup.history"
@@ -470,9 +478,13 @@ export default Plugin.define({
           // The current tab's lines, reactive on the tab, the scope and the
           // stored turn and history.
           const lines = (): Line[] => {
-            if (details.tab === "turn") return turnLines(sessionID ? turnDetail.bySession[sessionID] : undefined, details.w)
-            if (details.tab === "session") return sessionLines(sessionFigures(history.turns, sessionID), details.w)
-            return historyTabLines(history.turns, sessionID, details.scope, details.w)
+            const raw =
+              details.tab === "turn"
+                ? turnLines(sessionID ? turnDetail.bySession[sessionID] : undefined, details.w)
+                : details.tab === "session"
+                  ? sessionLines(sessionFigures(history.turns, sessionID), details.w)
+                  : historyTabLines(history.turns, sessionID, details.scope, details.w)
+            return spaced(raw, DIALOG_SPACING)
           }
           const note = (): string => {
             if (details.tab === "turn") {
@@ -530,10 +542,12 @@ export default Plugin.define({
           // the layout needs, the dialog goes to `xlarge` and is measured again.
           const fit = (tries: number): void => {
             setTimeout(() => {
-              // Less the side padding (2 x 2, as the mockup) and the scrollbar
-              // with a gap beside it (2): a full-width line that overflowed
-              // wrapped onto a second line, a blank-looking row (measured).
-              const inner = root?.width !== undefined ? root.width - 6 : undefined
+              // Less the side padding (2 x 2, as the mockup), and the
+              // scrollbar's column with a gap only when the content scrolls:
+              // reserved always, it left the right margin wider than the left
+              // (measured). A full-width line that overflowed would wrap.
+              const scrolls = lines().length > bodyRows()
+              const inner = root?.width !== undefined ? root.width - 4 - (scrolls ? 2 : 0) : undefined
               if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
                 ctx.ui.dialog.set({ size: "xlarge", centered: true })
                 fit(tries - 1)
@@ -561,9 +575,11 @@ export default Plugin.define({
           return (
             <box
               flexDirection="column"
+              // No top padding of our own: the dialog already pads its top by
+              // a row, and ours on top of it made the top heavier than the
+              // bottom (measured).
               paddingLeft={2}
               paddingRight={2}
-              paddingTop={1}
               paddingBottom={1}
               ref={(r: unknown) => (root = r as typeof root)}
             >

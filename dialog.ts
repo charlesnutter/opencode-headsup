@@ -561,3 +561,32 @@ function midCut(s: string, n: number): string {
   const keep = n - 1
   return `${s.slice(0, Math.ceil(keep / 3))}…${s.slice(s.length - Math.floor((keep * 2) / 3))}`
 }
+
+// ---- vertical spacing ------------------------------------------------------------------
+
+/**
+ * A terminal row has one height and a plugin cannot change it, so space
+ * between lines comes only in whole blank rows. Two ways to spend them:
+ *
+ * - "headings": a blank row under each section heading;
+ * - "bars": a blank row under a bar, so its blocks -- which fill their whole
+ *   row -- do not touch the legend or keys below. Consecutive bar rows (the
+ *   timeline, tools by time) stay together.
+ */
+export type Spacing = "tight" | "headings" | "bars"
+
+const isBarLine = (l: Line): boolean => l.some(([t]) => t.length >= 2 && /^[░█▒▓╳]+$/.test(t))
+const isHeading = (l: Line): boolean => l.some(([t, st]) => st === "rule" && t.startsWith("─")) && (l[0]?.[1] === "bold" || l[0]?.[1] === "engine")
+
+export function spaced(lines: readonly Line[], spacing: Spacing): Line[] {
+  if (spacing === "tight") return [...lines]
+  const out: Line[] = []
+  lines.forEach((l, i) => {
+    out.push(l)
+    const next = lines[i + 1]
+    const blankNext = next === undefined || next.length === 0
+    if (spacing === "headings" && isHeading(l) && !blankNext) out.push([])
+    if (spacing === "bars" && isBarLine(l) && !blankNext && !isBarLine(next as Line)) out.push([])
+  })
+  return out
+}
