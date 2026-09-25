@@ -496,7 +496,8 @@ export default Plugin.define({
           }
           // Sized to the content, up to 70% of the screen less the tabs and
           // footer; it scrolls only beyond that.
-          const bodyRows = (): number => Math.max(4, Math.min(lines().length, Math.floor(details.rows * 0.75) - 6))
+          // Less the tabs, footer, their gaps, the panel's padding and the ring.
+          const bodyRows = (): number => Math.max(4, Math.min(lines().length, Math.floor(details.rows * 0.75) - 9))
           ctx.keymap.layer(() => ({
             mode: "global",
             priority: 100,
@@ -544,7 +545,8 @@ export default Plugin.define({
               // reserved always, it left the right margin wider than the left
               // (measured). A full-width line that overflowed would wrap.
               const scrolls = lines().length > bodyRows()
-              const inner = root?.width !== undefined ? root.width - 4 - (scrolls ? 2 : 0) : undefined
+              // Less the ring (2 x 2) and the panel's padding (2 x 2).
+              const inner = root?.width !== undefined ? root.width - 8 - (scrolls ? 2 : 0) : undefined
               if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
                 ctx.ui.dialog.set({ size: "xlarge", centered: true })
                 fit(tries - 1)
@@ -569,17 +571,30 @@ export default Plugin.define({
             }, 60)
           }
           fit(1)
+          // Two tones: an outer ring in the dialog's own colour (its top row is
+          // the dialog's padding; the plugin adds the sides and bottom), round
+          // a lighter panel with padding of its own. The ring reads as a thick
+          // dark border, as the sidebar boxes do (chosen from the mockup).
+          const panel = (): Color | undefined =>
+            ctx.themeMode === "dark"
+              ? ("#1f1f1f" as unknown as Color)
+              : (themeColor("background.raised.high", "background.surface.offset") as Color | undefined)
           return (
             <box
               flexDirection="column"
-              // No top padding of our own: the dialog already pads its top by
-              // a row, and ours on top of it made the top heavier than the
-              // bottom (measured).
               paddingLeft={2}
               paddingRight={2}
               paddingBottom={1}
               ref={(r: unknown) => (root = r as typeof root)}
             >
+             <box
+              flexDirection="column"
+              backgroundColor={panel()}
+              paddingLeft={2}
+              paddingRight={2}
+              paddingTop={1}
+              paddingBottom={1}
+             >
               {drawLine(tabsLine(details.tab, note(), details.w))}
               <text selectable={false}> </text>
               <scrollbox
@@ -594,6 +609,7 @@ export default Plugin.define({
               </scrollbox>
               <text selectable={false}> </text>
               {drawLine(footLine(details.tab, details.w))}
+             </box>
             </box>
           )
         },
