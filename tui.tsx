@@ -311,7 +311,15 @@ export default Plugin.define({
     /** Below this many terminal columns the two columns are one, switched by tab. */
     const TWO_COLUMN_MIN = 110
     const DETAIL_COL = 46
+    // Whether our dialog is the one showing. The keybind toggles it: pressed
+    // again while it was open, it re-opened the dialog over itself (a blink).
+    let detailsOpen = false
     const openDetails = (sessionID: string | undefined): void => {
+      if (detailsOpen) {
+        dbg("details: toggle closed")
+        ctx.ui.dialog.clear()
+        return
+      }
       dbg(`details: open for ${sessionID ?? "no session"}; terminal ${ctx.renderer.terminalWidth}x${ctx.renderer.terminalHeight}`)
       const stored = sessionID ? lineFor(panel, sessionID) : PLACEHOLDER
       const turnView: TurnView =
@@ -337,6 +345,7 @@ export default Plugin.define({
         sized(cols, rows)
       }
       ctx.renderer.on("resize", onResize)
+      detailsOpen = true
       ctx.ui.dialog.show(
         () => {
           const subdued = subduedColor()
@@ -428,6 +437,7 @@ export default Plugin.define({
         },
         () => {
           ctx.renderer.off("resize", onResize)
+          detailsOpen = false
           dbg("details: closed")
         }
       )
