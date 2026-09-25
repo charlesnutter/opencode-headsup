@@ -8,31 +8,36 @@ for both local inference engines and remote models. It contains a
 universal layer of baseline metrics along with any additional data from
 the provider.
 
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/screenshot-sidebar.png" alt="Heads Up in the OpenCode sidebar: the last turn and the session so far" />
+    </td>
+    <td width="50%">
+      <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/screenshot-turn.png" alt="Heads Up details dialog, Turn tab" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>Sidebar</strong><br />The last turn and the session so far, each collapsible, with <code>details ›</code> for the full picture.</td>
+    <td width="50%" align="center"><strong>Turn</strong><br />Where the time went, a timeline per step, every tool call, tokens and the engine's own figures.</td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/screenshot-session.png" alt="Heads Up details dialog, Session tab" />
+    </td>
+    <td width="50%">
+      <img src="https://raw.githubusercontent.com/charlesnutter/opencode-headsup/main/assets/screenshot-history.png" alt="Heads Up details dialog, History tab" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>Session</strong><br />Speed and its spread, where the time went, tools, coverage and engine averages.</td>
+    <td width="50%" align="center"><strong>History</strong><br />Every turn in fixed columns, for this session or all of them.</td>
+  </tr>
+</table>
 
-```
-▾ MTPLX · last turn
+## Features
 
-speed       34.4 tok/s
-ttft        17.19s
-prefill     460 tok/s
-tokens      1,233
-time        207.37s
-MTP         3.42x
-accepted    91/79/64%
-sub-agent   191 tok
-            23.91s
-
-▸ Session · 14 turns  48.2 tok/s
-```
-
-Two boxes, each opened and closed by clicking its heading: the last turn,
-and the session so far. `details ›` under them opens the full picture:
-where each turn's time went, every step and tool call, and the session's
-spread and coverage (see [Details](#details)).
-
-Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
-(OpenCode 1.18.x), see
-[opencode-engine-hud](https://github.com/charlesnutter/opencode-engine-hud).
+** Feature List Goes here **
 
 ## Contents
 
@@ -48,15 +53,15 @@ Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
 
 ## Install
 
+Headsup requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
+(OpenCode 1.18.x), see
+[opencode-engine-hud](https://github.com/charlesnutter/opencode-engine-hud).
+
 ```bash
 opencode plugin add @banburist/opencode-headsup
 ```
 
-Restart OpenCode. The panel appears in the sidebar footer after the first
-turn. `opencode plugin list` shows what is installed; `plugin update` and
-`plugin remove` handle the rest.
-
-Equivalent, if you keep your config in version control:
+Or place it within the OpenCode cli config file.
 
 ```jsonc
 // ~/.config/opencode/cli.json
