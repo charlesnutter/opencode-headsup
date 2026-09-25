@@ -210,9 +210,13 @@ function legendFlow(t: Split, w: number): Line[] {
  */
 export type AlignedRow = { label: string; value: string; qual?: string; bar?: Array<readonly [number, Style, string]>; note?: string }
 
-export function alignedRows(rows: readonly AlignedRow[], barCells: number): Line[] {
+export function alignedRows(rows: readonly AlignedRow[], barCells: number, w: number): Line[] {
   const vw = Math.max(0, ...rows.map((r) => r.value.length))
   const qw = Math.max(0, ...rows.map((r) => (r.qual ? r.qual.length + 1 : 0)))
+  // The bar gives way to the widest note on a barred row, so nothing overflows.
+  const lead = LABEL + vw + qw + 3
+  const note = Math.max(0, ...rows.filter((r) => r.bar).map((r) => (r.note ? r.note.length + 3 : 0)))
+  barCells = Math.max(6, Math.min(barCells, w - lead - note))
   return rows.map((r): Line => {
     const line: Line = [
       [r.label.padEnd(LABEL), "dim"],
@@ -381,7 +385,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
     })
   }
   if (d.cost !== undefined) tokenRows.push({ label: "cost", value: `$${d.cost.toFixed(4)}` })
-  out.push(heading("Tokens", w), ...alignedRows(tokenRows, sc(24, w)), [])
+  out.push(heading("Tokens", w), ...alignedRows(tokenRows, sc(24, w), w), [])
 
   // Engine: its own figures, a few to a line; or which were left out and why.
   if (d.engineRows.length > 0) {
@@ -544,7 +548,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     sessRows.push({ label: "input", value: n0(fresh), qual: "fresh", bar: [[fresh, "gen", SQ], [cached, "wait", SQ]], note: `${n0(cached)} cached (${share(cached, fresh + cached)} hit)` })
   }
   if (f.tokens.cacheWrite > 0) sessRows.push({ label: "", value: n0(f.tokens.cacheWrite), qual: "written to cache" })
-  out.push(heading("Tokens", w), ...alignedRows(sessRows, sc(24, w)))
+  out.push(heading("Tokens", w), ...alignedRows(sessRows, sc(24, w), w))
 
   if (f.retryReasons.length > 0) {
     out.push([], heading("Retries", w, String(s.retries)))
