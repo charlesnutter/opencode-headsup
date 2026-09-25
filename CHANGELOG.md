@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.3.1] – 2026-09-24
 ### Changed
 - The first turn after OpenCode starts can show engine figures on
   `vllm`, `sglang`, `vllmmlx`, `aphrodite`, `lmdeploy`, `llamacpp`,

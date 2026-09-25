@@ -151,16 +151,16 @@ plugin.
 |---|---|---|---|---|---|---|---|---|
 | [`mtplx`](#mtplx) | ✅ | ✅ | ✅ | ✅ | ❌ | MTP accept % | ✅ | live |
 | [`omlx`](#omlx) | ✅ | 🟡 | ✅ | ✅ | ✅ | — | ✅ | live |
-| [`llamacpp`](#llamacpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | ❌ | live |
-| [`llamafile`](#llamafile) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | ❌ | live |
+| [`llamacpp`](#llamacpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | 🟡 | live |
+| [`llamafile`](#llamafile) | ✅ | 🟡 | ✅ | ✅ | ❌ | — | 🟡 | live |
 | [`mlxserve`](#mlxserve) | ✅ | ✅ | ❌ | ✅ | ❌ | cold-start flag | ✅ | live |
-| [`splash`](#splash) | ✅ | 🟡 | ✅ | ✅ | ✅ | draft accept % | ❌ | live |
+| [`splash`](#splash) | ✅ | 🟡 | ✅ | ✅ | ✅ | draft accept % | 🟡 | live |
 | [`koboldcpp`](#koboldcpp) | ✅ | 🟡 | ✅ | ✅ | ❌ | draft accept % | ✅ | live |
-| [`vllm`](#vllm) | ✅ | ✅ | ❌ | ✅ | ✅ | — | ❌ | live |
-| [`sglang`](#sglang) | ✅ | ✅ | ❌ | ✅ | ✅ | — | ❌ | live |
-| [`vllmmlx`](#vllmmlx) | ✅ | ✅ | ❌ | ✅ | ❌ | — | ❌ | live |
-| [`aphrodite`](#aphrodite) | ✅ | ✅ | ❌ | ✅ | ✅ | — | ❌ | derived |
-| [`lmdeploy`](#lmdeploy) | ✅ | ✅ | ✅ | ✅ | ❌ | — | ❌ | synthetic |
+| [`vllm`](#vllm) | ✅ | ✅ | ❌ | ✅ | ✅ | — | 🟡 | live |
+| [`sglang`](#sglang) | ✅ | ✅ | ❌ | ✅ | ✅ | — | 🟡 | live |
+| [`vllmmlx`](#vllmmlx) | ✅ | ✅ | ❌ | ✅ | ❌ | — | 🟡 | live |
+| [`aphrodite`](#aphrodite) | ✅ | ✅ | ❌ | ✅ | ✅ | — | 🟡 | derived |
+| [`lmdeploy`](#lmdeploy) | ✅ | ✅ | ✅ | ✅ | ❌ | — | 🟡 | synthetic |
 | anything else | 🟡 | 🟡 | ❌ | 🟡 | 🟡 | — | — | live |
 
 ### Key
@@ -194,17 +194,22 @@ turn after OpenCode starts has nothing to subtract from.
 
 - ✅ — engine telemetry from the very first turn. These publish a *last
   request* figure (`mtplx`, `koboldcpp`) or an identifiable per-request
-  record (`mlxserve`), so one reading is enough. `omlx` renders too, but
-  its first-turn rates are server-lifetime averages, labelled `(avg)`.
-- ❌ — the first turn shows the universal line only, then engine telemetry
-  from the second turn on. Nothing is broken and nothing is lost; a rate
-  invented from a single counter reading would describe the whole server's
-  history, not your turn.
+  record (`mlxserve`), so one reading is enough. `omlx` is primed like the
+  🟡 engines below; when it has no reading yet, it still renders, with
+  server-lifetime averages labelled `(avg)`.
+- 🟡 — primed: when a turn starts on one of these engines and there is no
+  reading yet, that one engine is read before the request reaches it, so
+  the first turn has engine telemetry too. The exception is a brand-new
+  session that has not used or selected a model yet: OpenCode does not tell
+  plugins which model it will use, so that first turn shows the universal
+  line, then engine telemetry from the second turn on. Nothing is broken
+  and nothing is lost; a rate invented from a single counter reading would
+  describe the whole server's history, not your turn.
 - — — no adapter, so the universal layer is all there is, on every turn.
 
 The baseline lives in memory for the life of the TUI, so this applies once
-per OpenCode session rather than once per install. It is more visible with
-`splash opencode --standalone`, which starts a fresh process every time.
+per OpenCode session rather than once per install. Nothing is read at
+startup, and an engine you are not using is never read.
 
 ## Engine Details
 
