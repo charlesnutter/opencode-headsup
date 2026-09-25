@@ -679,42 +679,22 @@ function midCut(s: string, n: number): string {
 /**
  * A terminal row has one height and a plugin cannot change it, so space
  * between lines comes only in whole blank rows. "roomy" is the layout the
- * user settled on (2026-09-25, by editing the mockup):
- *
- * - a blank row under every section heading;
- * - a blank row above and below a bar, whose blocks fill their whole row and
- *   would otherwise touch the text next to it;
- * - except inside a chart -- the timeline's steps, tools by time -- whose rows
- *   belong together and keep their axis beside them.
+ * user settled on (2026-09-25, by editing the mockup): a blank row under every
+ * section heading, and the blank row between sections. Nothing else: rows
+ * around the bars made the Tokens section and the time bar look gapped.
  */
 export type Spacing = "tight" | "roomy"
 
-const isBarLine = (l: Line): boolean => l.some(([t]) => t.length >= 2 && /^[░█▒▓╳■]+$/.test(t))
 const isHeading = (l: Line): boolean =>
   l.some(([t, st]) => st === "rule" && t.startsWith("─")) && (l[0]?.[1] === "bold" || l[0]?.[1] === "engine")
-/** A chart row: an indented, dim label (a step number, a tool name), then its bar. */
-const isChartRow = (l: Line): boolean => {
-  const first = l[0]
-  return first !== undefined && first[1] === "dim" && /^ {2}\S/.test(first[0]) && isBarLine(l)
-}
-/** The timeline's axis, which stays under its chart. */
-const isAxis = (l: Line): boolean => l[0]?.[1] === "dim" && /^ {5}0s$/.test(l[0][0])
 
 export function spaced(lines: readonly Line[], spacing: Spacing): Line[] {
   if (spacing === "tight") return [...lines]
   const out: Line[] = []
-  const blank = (): void => {
-    if (out.length > 0 && (out[out.length - 1] as Line).length > 0) out.push([])
-  }
   lines.forEach((l, i) => {
-    const bar = isBarLine(l) && !isChartRow(l)
-    if (bar) blank()
     out.push(l)
     const next = lines[i + 1]
-    if (next === undefined || next.length === 0) return
-    if (isHeading(l)) blank()
-    else if (bar) blank()
-    else if (isChartRow(l) && !isChartRow(next) && !isAxis(next)) blank()
+    if (isHeading(l) && next !== undefined && next.length > 0) out.push([])
   })
   return out
 }

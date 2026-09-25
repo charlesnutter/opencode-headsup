@@ -540,13 +540,12 @@ export default Plugin.define({
           // the layout needs, the dialog goes to `xlarge` and is measured again.
           const fit = (tries: number): void => {
             setTimeout(() => {
-              // Less the side padding (2 x 2, as the mockup), and the
-              // scrollbar's column with a gap only when the content scrolls:
-              // reserved always, it left the right margin wider than the left
-              // (measured). A full-width line that overflowed would wrap.
-              const scrolls = lines().length > bodyRows()
-              // Less the ring (2 x 2) and the panel's padding (2 x 2).
-              const inner = root?.width !== undefined ? root.width - 8 - (scrolls ? 2 : 0) : undefined
+              // Less the ring (2 x 2), the panel's padding (2 x 2) and the
+              // scrollbar with a gap (2), always: reserved only when the
+              // content scrolled, the width was worked out before the
+              // scrollbar appeared, so full-width lines ran 2 cells long and
+              // wrapped onto a second, blank-looking row (measured).
+              const inner = root?.width !== undefined ? root.width - 10 : undefined
               if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
                 ctx.ui.dialog.set({ size: "xlarge", centered: true })
                 fit(tries - 1)
@@ -619,9 +618,9 @@ export default Plugin.define({
           dbg("details: closed")
         }
       )
-      // large (88 cells, measured) is nearest the mockup's 76-cell dialog;
-      // the content fills it.
-      ctx.ui.dialog.set({ size: "large", centered: true })
+      // xlarge: large (88 cells) left too little room once the scrollbar
+      // and the two-tone ring were in (the user's call). The content fills it.
+      ctx.ui.dialog.set({ size: "xlarge", centered: true })
     }
     const currentSession = (): string | undefined => {
       const r = ctx.ui.router.current()
