@@ -39,6 +39,15 @@ const clock = (ms: number): string => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
 }
 
+/** A share as a percent that never rounds a real part to 0 or the rest to 100. */
+export const share = (part: number, whole: number): string => {
+  if (whole <= 0) return "0%"
+  const p = (part / whole) * 100
+  if (p > 0 && p < 1) return "<1%"
+  if (p < 100 && p > 99) return `${p.toFixed(1)}%`
+  return `${Math.round(p)}%`
+}
+
 // ---- building blocks ----------------------------------------------------------
 
 /** A section title, a rule to the width, and an optional note at the right. */
@@ -118,7 +127,7 @@ function timeSplit(
     [GLYPH[k], STYLE[k]],
     [` ${NAME[k].padEnd(11)}`, "dim"],
     [dur(t[k]).padStart(8), "bold"],
-    [`${String(pct[i]).padStart(4)}%`, "dim"],
+    [(pct[i] === 0 && t[k] > 0 ? "<1%" : `${pct[i]}%`).padStart(5), "dim"],
   ]
   const half = Math.ceil(keys.length / 2)
   for (let r = 0; r < half; r++) {
@@ -146,7 +155,7 @@ export function tabsLine(sel: Tab, right: string, w = CONTENT_WIDTH): Line {
 export function footLine(tab: Tab, w = CONTENT_WIDTH): Line {
   const keys: Line = [
     ["tab", "bold"],
-    [" view  ", "dim"],
+    [" switch view  ", "dim"],
     ["↑↓", "bold"],
     [" scroll  ", "dim"],
   ]
@@ -247,26 +256,37 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
   // Tokens: the five kinds, with the cache's share and the context used as bars.
   const t = d.tokens
   out.push(heading("Tokens", w))
+  // Generated first, as the steps and the engine count it; then its split.
   const produced = t.output + t.reasoning
-  out.push(row("output", n0(t.output), t.reasoning > 0 ? `  +${n0(t.reasoning)} reasoning (${Math.round((t.reasoning / Math.max(1, produced)) * 100)}%)` : ""))
+  out.push(
+    row(
+      "generated",
+      n0(produced),
+      t.reasoning > 0 ? `  ${n0(t.output)} answer · ${n0(t.reasoning)} reasoning (${share(t.reasoning, produced)})` : ""
+    )
+  )
   const prompt = t.input + t.cacheRead
+  const BAR_AT = 24
   if (prompt > 0) {
+    const head = row("prompt", n0(prompt))
     out.push([
-      ...row("input", n0(t.input), " fresh  "),
+      ...head,
+      [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
       ...bar([[t.input, "gen", "█"], [t.cacheRead, "wait", "░"]], 20),
-      [`  ${n0(t.cacheRead)} cached (${Math.round((t.cacheRead / prompt) * 100)}%)`, "dim"],
+      [`  ${n0(t.input)} fresh · ${n0(t.cacheRead)} cached (${share(t.cacheRead, prompt)})`, "dim"],
     ])
   }
   if (t.cacheWrite > 0) out.push(row("", n0(t.cacheWrite), " written to cache"))
   if (d.context) {
+    const head = row("context", n0(d.context.used))
     const tail: Line = d.context.limit
       ? [
-          [` of ${n0(d.context.limit)}  `, "dim"],
-          ...bar([[d.context.used, "gen", "█"], [Math.max(0, d.context.limit - d.context.used), "wait", "░"]], 16),
-          [`  ${Math.round((d.context.used / d.context.limit) * 100)}%`, "dim"],
+          [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
+          ...bar([[d.context.used, "gen", "█"], [Math.max(0, d.context.limit - d.context.used), "wait", "░"]], 20),
+          [`  ${share(d.context.used, d.context.limit)} of ${n0(d.context.limit)}`, "dim"],
         ]
       : []
-    out.push([...row("context", n0(d.context.used)), ...tail])
+    out.push([...head, ...tail])
   }
   if (d.cost !== undefined) out.push(row("cost", `$${d.cost.toFixed(4)}`))
   out.push([])
@@ -336,13 +356,13 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
   const out: Line[] = []
   const s = f.summary
 
-  out.push(heading("Speed", w, "tok/s, generation only"))
+  out.push(heading("Speed", w, "generation only"))
   if (s.genTokS !== undefined) {
     const spread =
       f.rates.length > 1
         ? `   min ${n1(quantile(f.rates, 0) as number)} · median ${n1(quantile(f.rates, 0.5) as number)} · p90 ${n1(quantile(f.rates, 0.9) as number)} · max ${n1(quantile(f.rates, 1) as number)}`
         : ""
-    out.push(row("average", n1(s.genTokS), spread))
+    out.push(row("average", `${n1(s.genTokS)} tok/s`, spread))
   }
   const spark = sparkline(f.rates.slice(0, 24).reverse())
   if (spark) out.push([...row("trend", ""), [spark, "accent"], [`   last ${Math.min(24, f.rates.length)} turns`, "dim"]])
@@ -372,17 +392,21 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
 
   out.push(heading("Coverage", w, "turns with the engine's own figures"))
   out.push([
-    ...row("engine", `${n0(f.coverage.engine)} of ${n0(f.coverage.total)}`, "   "),
+    ...row("engine", `${n0(f.coverage.engine)} of ${n0(f.coverage.total)}`, " ".repeat(Math.max(1, 12 - `${n0(f.coverage.engine)} of ${n0(f.coverage.total)}`.length))),
     ...bar([[f.coverage.engine, "gen", "█"], [f.coverage.total - f.coverage.engine, "wait", "░"]], 20),
   ])
   f.coverage.without.forEach(({ label, n }, i) => out.push(row(i === 0 ? "without" : "", "", `${n0(n)} ${label}`)))
   out.push([])
 
   out.push(heading("Tokens", w))
-  out.push(row("output", n0(f.tokens.output), f.tokens.reasoning > 0 ? `  +${n0(f.tokens.reasoning)} reasoning` : ""))
+  const gen = f.tokens.output + f.tokens.reasoning
+  out.push(
+    row("generated", n0(gen), f.tokens.reasoning > 0 ? `  ${n0(f.tokens.output)} answer · ${n0(f.tokens.reasoning)} reasoning (${share(f.tokens.reasoning, gen)})` : "")
+  )
   if (f.tokens.input !== undefined || f.tokens.cacheRead !== undefined) {
-    const hit = s.cacheHit !== undefined ? `  (${Math.round(s.cacheHit * 100)}% hit)` : ""
-    out.push(row("input", n0(f.tokens.input ?? 0), ` fresh   ${n0(f.tokens.cacheRead ?? 0)} cached${hit}`))
+    const fresh = f.tokens.input ?? 0
+    const cached = f.tokens.cacheRead ?? 0
+    out.push(row("prompt", n0(fresh + cached), `  ${n0(fresh)} fresh · ${n0(cached)} cached (${share(cached, fresh + cached)})`))
   }
   if (f.tokens.cacheWrite > 0) out.push(row("", n0(f.tokens.cacheWrite), " written to cache"))
   out.push(row("totals", `${n0(f.turns)} turns`, `  ${n0(f.steps)} steps · ${dur(f.elapsedS)}${f.cost !== undefined ? ` · $${f.cost.toFixed(4)}` : ""}`))
@@ -426,7 +450,7 @@ export function historyTabLines(
   // Across every session the model column needs the room; cache and tool
   // counts stay in the session view, where the model is one.
   const showCache = !showModel && rows.some((t) => (t.cached ?? 0) > 0)
-  const showTools = !showModel
+  const showTools = !showModel && rows.some((t) => Object.values(t.tools ?? {}).some((x) => x.n > 0))
 
   // Headline: the scope's totals, and its generation speed on the newest model.
   const tokens = rows.reduce((a, t) => a + t.tokens, 0)
@@ -463,18 +487,21 @@ export function historyTabLines(
     ],
     [ENGINE_MARK, "engine"],
   ]
-  out.push(header, [["─".repeat(Math.min(w, width(header))), "rule"]])
+  out.push(header, [["─".repeat(w), "rule"]])
   const notes: string[] = []
   for (const t of rows.slice(0, 200)) {
     const calls = Object.values(t.tools ?? {}).reduce((a, x) => a + x.n, 0)
-    const model = t.model.length > modelW - 1 ? `${t.model.slice(0, modelW - 2)}…` : t.model
+    // Cut from the middle: a model's distinguishing part is often its end.
+    const keep = modelW - 2
+    const model =
+      t.model.length > modelW - 1 ? `${t.model.slice(0, Math.ceil(keep / 3))}…${t.model.slice(t.model.length - Math.floor((keep * 2) / 3))}` : t.model
     out.push([
       [`  ${clock(t.at).padEnd(6)}`, ""],
       ...(showModel ? ([[model.padEnd(modelW), "dim"]] as Line) : []),
       [(t.rate !== undefined && t.rateWindow !== "whole" && !t.outcome ? n1(t.rate) : "—").padStart(8), "bold"],
       [`${(t.tokens > 0 ? n0(t.tokens) : "—").padStart(8)}${(t.ttft !== undefined ? `${t.ttft.toFixed(2)}s` : "—").padStart(9)}${(t.totalS !== undefined ? dur(t.totalS) : "—").padStart(9)}${showTools ? (calls > 0 ? String(calls) : "").padStart(6) : ""}`, ""],
       ...(showCost ? ([[(t.cost ? `$${t.cost.toFixed(4)}` : "").padStart(9), ""]] as Line) : []),
-      ...(showCache ? ([[(t.cached ? n0(t.cached) : "").padStart(9), "dim"]] as Line) : []),
+      ...(showCache ? ([[(t.cached ? n0(t.cached) : "").padStart(9), ""]] as Line) : []),
       ["  ", ""],
       t.source === "engine" ? [ENGINE_MARK, "engine"] : ["·", "dim"],
     ])
