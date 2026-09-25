@@ -26,7 +26,9 @@ sub-agent   191 tok
 ```
 
 Two boxes, each opened and closed by clicking its heading: the last turn,
-and the session so far.
+and the session so far. `details ›` under them opens the full picture:
+where each turn's time went, every step and tool call, and the session's
+spread and coverage (see [Details](#details)).
 
 Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
 (OpenCode 1.18.x), see
@@ -36,6 +38,7 @@ Requires [**OpenCode 2**](https://opencode.ai/v2/docs). For the v1 line
 
 - [Install](#install)
 - [Keys](#keys)
+- [Details](#details)
 - [Configuration](#configuration)
 - [Supported Engines](#supported-engines)
 - [Engine Details](#engine-details)
@@ -68,10 +71,11 @@ Equivalent, if you keep your config in version control:
 | --- | --- |
 | `ctrl+shift+m` | Collapse/expand the last-turn box. Clicking its heading does the same. |
 | `ctrl+shift+h` | Open/close the per-turn history panel. |
+| `ctrl+shift+d` | Open/close the details dialog. So do `/headsup` and clicking `details ›`. |
 
-Both are registered with stable command ids (`headsup.toggle`,
-`headsup.panel`), so they can be remapped from your own OpenCode keybind
-config and are reachable from the command palette.
+All three are registered with stable command ids (`headsup.toggle`,
+`headsup.panel`, `headsup.details`), so they can be remapped from your own
+OpenCode keybind config and are reachable from the command palette.
 
 The Session box has no key; click its heading. Collapsed, each box keeps
 one figure rather than becoming a bare label:
@@ -79,6 +83,39 @@ one figure rather than becoming a bare label:
 ```
 ▸ MTPLX · last turn  34.4 tok/s
 ```
+
+## Details
+
+A dialog with the last turn on the left and the session on the right. On a
+terminal narrower than 110 columns it shows one at a time; `tab` switches.
+It scrolls with the wheel, `↑` `↓` and page up/down; `esc` closes it.
+
+**Last turn**
+- **Where the time went**, in seconds and as shares that add up to the
+  turn's total: waiting for the first token, generating, tools, sub-agents,
+  compaction, and the rest. A moment is counted once, so a tool running
+  beside a sub-agent is not counted twice.
+- **Steps**: tokens, tok/s and time to first token per step, each tool call
+  and how long it ran, retries, and a step that waited on a compaction.
+- **Tokens**: output, reasoning, fresh input, cache read and cache write;
+  context used against the model's limit.
+- **◆ Engine**: only what the engine itself measured -- MTPLX's acceptance
+  at every depth and its verify passes, prefill and decode as tokens and
+  seconds, cache reuse, draft acceptance, and per-step rates where the
+  engine is read per step. When its figures were not used, it says which
+  and why.
+- Retry and error reasons in full, and sub-agent totals.
+
+**Session** (the current model's turns)
+- Speed as an average and a spread (min, median, p90, max), a trend, and
+  time to first token (median, p90, max).
+- Where the time went, in seconds, across the session.
+- Tools by time, retries by reason, tokens in all five kinds.
+- **Coverage**: how many turns had the engine's own figures, and why the
+  rest did not (first turn, compaction, overlapping requests, no engine
+  telemetry, ...).
+
+Everything unmarked is OpenCode's own data; `◆` marks the engine's.
 
 ## Configuration
 
