@@ -357,8 +357,22 @@ export default Plugin.define({
       }
       return best?.c as Color | undefined
     }
+    // On a dark theme the dialog uses the approved mockup's colours exactly;
+    // on a light one, shades picked from the theme by contrast (below).
+    const MOCKUP: Partial<Record<Style, string>> = {
+      dim: "#8a8a8a",
+      wait: "#5a5a5a",
+      gen: "#6b9bff",
+      accent: "#6b9bff",
+      tool: "#5fb3a8",
+      sub: "#b48ae0",
+      comp: "#8a8a8a",
+      engine: "#e0a95a",
+      rule: "#4a4a4a",
+    }
     const palette = new Map<Style, Color | undefined>()
     const styleColor = (st: Style): Color | undefined => {
+      if (ctx.themeMode === "dark" && MOCKUP[st]) return MOCKUP[st] as unknown as Color
       if (palette.has(st)) return palette.get(st)
       let c: Color | undefined
       switch (st) {
@@ -400,8 +414,14 @@ export default Plugin.define({
               st === "bold" ? (
                 <b>{t}</b>
               ) : st === "tab" ? (
-                <span style={{ fg: themeColor("background.base") as Color | undefined, bg: themeColor("text.base") as Color | undefined }}>
-                  {t}
+                <span
+                  style={
+                    ctx.themeMode === "dark"
+                      ? { fg: "#181818" as unknown as Color, bg: "#eeeeee" as unknown as Color }
+                      : { fg: themeColor("background.base") as Color | undefined, bg: themeColor("text.base") as Color | undefined }
+                  }
+                >
+                  <b>{t}</b>
                 </span>
               ) : (
                 <span style={{ fg: styleColor(st) }}>{t}</span>
@@ -510,10 +530,10 @@ export default Plugin.define({
           // the layout needs, the dialog goes to `xlarge` and is measured again.
           const fit = (tries: number): void => {
             setTimeout(() => {
-              // Less the side padding (2 x 4) and the scrollbar with a gap
-              // beside it (2): a full-width line that overflowed wrapped onto
-              // a second line, which read as a blank row under every heading.
-              const inner = root?.width !== undefined ? root.width - 10 : undefined
+              // Less the side padding (2 x 2, as the mockup) and the scrollbar
+              // with a gap beside it (2): a full-width line that overflowed
+              // wrapped onto a second line, a blank-looking row (measured).
+              const inner = root?.width !== undefined ? root.width - 6 : undefined
               if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
                 ctx.ui.dialog.set({ size: "xlarge", centered: true })
                 fit(tries - 1)
@@ -541,8 +561,8 @@ export default Plugin.define({
           return (
             <box
               flexDirection="column"
-              paddingLeft={4}
-              paddingRight={4}
+              paddingLeft={2}
+              paddingRight={2}
               paddingTop={1}
               paddingBottom={1}
               ref={(r: unknown) => (root = r as typeof root)}
@@ -570,9 +590,9 @@ export default Plugin.define({
           dbg("details: closed")
         }
       )
-      // xlarge (116 cells on a 214-column terminal, measured) leaves room for
-      // wider margins around a 72-96 cell layout.
-      ctx.ui.dialog.set({ size: "xlarge", centered: true })
+      // large (88 cells, measured) is nearest the mockup's 76-cell dialog;
+      // the content fills it.
+      ctx.ui.dialog.set({ size: "large", centered: true })
     }
     const currentSession = (): string | undefined => {
       const r = ctx.ui.router.current()

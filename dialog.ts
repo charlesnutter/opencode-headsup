@@ -58,32 +58,6 @@ export function heading(title: string, w: number, right = ""): Line {
   return line
 }
 
-/** Width of the value column, right-aligned, where a row's value lines up with others. */
-const VALUE = 9
-/** Where a row's bar (or its note) starts: after the label and value columns, and a gap. */
-const BAR_AT = LABEL + VALUE + 3
-
-/** `label` dim, then `value` bold and right-aligned in the value column. */
-export function valueRow(label: string, value: string): Line {
-  return [[label.padEnd(LABEL), "dim"], [value.padStart(VALUE), "bold"]]
-}
-
-/**
- * The grid every figure row uses: label, value right-aligned in the value
- * column, and what follows (a unit, a note, a bar) from a fixed column.
- */
-export function gridRow(label: string, value: string, tail: Line | string = []): Line {
-  const head = valueRow(label, value)
-  const rest: Line = typeof tail === "string" ? (tail ? [[tail, "dim"]] : []) : tail
-  return rest.length > 0 ? [...head, [" ".repeat(BAR_AT - width(head)), ""], ...rest] : head
-}
-
-/** A row's bar grows with the width: about 40% of what follows the value column. */
-const rowBar = (w: number): number => Math.max(20, Math.floor((w - BAR_AT) * 0.4))
-
-/** A heading and the blank row under it: every section opens this way. */
-export const titled = (title: string, w: number, right = ""): Line[] => [heading(title, w, right), []]
-
 /** `label` dim in its column, `value` bold, `tail` dim. */
 export function row(label: string, value: string, tail = ""): Line {
   const line: Line = [[label.padEnd(LABEL), "dim"], [value, "bold"]]
@@ -119,12 +93,9 @@ export function bar(parts: ReadonlyArray<readonly [value: number, style: Style, 
   return parts.flatMap(([, style, glyph], i) => ((n[i] as number) > 0 ? [[glyph.repeat(n[i] as number), style] as const] : []))
 }
 
-// Bars are a lower half block: a full block filled its whole row and touched
-// the text above and below (the dialog read as cramped), and a line (━) read
-// as a hairline in the terminal's font. Parts are told apart by colour; the
-// legend marks each with ■.
-const BAR = "▄"
-const GLYPH = { waiting: BAR, generating: BAR, tools: BAR, subagents: BAR, compaction: BAR, other: BAR } as const
+// The mockup's glyphs: parts of a bar differ by shade as well as colour, so
+// they still read apart where colour does not.
+const GLYPH = { waiting: "░", generating: "█", tools: "▒", subagents: "▓", compaction: "╳", other: "·" } as const
 const STYLE: Record<keyof typeof GLYPH, Style> = {
   waiting: "wait",
   generating: "gen",
@@ -140,37 +111,6 @@ const NAME: Record<keyof typeof GLYPH, string> = {
   subagents: "sub-agents",
   compaction: "compaction",
   other: "other",
-}
-
-/** Where the time went: a bar, then a legend in two columns with seconds and shares. */
-function timeSplit(
-  t: { waiting: number; generating: number; tools: number; subagents: number; compaction: number; other: number },
-  total: number,
-  w: number
-): Line[] {
-  const keys = (Object.keys(GLYPH) as Array<keyof typeof GLYPH>).filter(
-    (k) => t[k] > 0 || k === "waiting" || k === "generating"
-  )
-  const pct = percents(keys.map((k) => t[k]))
-  const out: Line[] = [...titled("Where the time went", w, dur(total))]
-  // The bar and legend start at the label column, and each legend value ends
-  // where every other row's value does.
-  out.push(bar(keys.map((k) => [t[k], STYLE[k], GLYPH[k]] as const), w))
-  const cell = (k: keyof typeof GLYPH, i: number): Line => [
-    ["■", STYLE[k]],
-    [` ${NAME[k].padEnd(LABEL - 2)}`, "dim"],
-    [dur(t[k]).padStart(VALUE), "bold"],
-    [(pct[i] === 0 && t[k] > 0 ? "<1%" : `${pct[i]}%`).padStart(5), "dim"],
-  ]
-  const half = Math.ceil(keys.length / 2)
-  for (let r = 0; r < half; r++) {
-    const left = keys[r] as keyof typeof GLYPH
-    const right = keys[r + half]
-    const line: Line = [...cell(left, r)]
-    if (right) line.push([" ".repeat(Math.max(2, Math.floor(w / 2) - width(line))), ""], ...cell(right, r + half))
-    out.push(line)
-  }
-  return out
 }
 
 // ---- the tabs line and the footer -------------------------------------------------
@@ -200,32 +140,89 @@ export function footLine(tab: Tab, w = CONTENT_WIDTH): Line {
   return keys
 }
 
+// ---- scale ----------------------------------------------------------------------
+
+/** The mockup was drawn 72 cells wide; its fixed sizes scale with the width. */
+const MOCK = 72
+const sc = (cells: number, w: number): number => Math.max(1, Math.round((cells * w) / MOCK))
+
+type Split = { waiting: number; generating: number; tools: number; subagents: number; compaction: number; other: number }
+const KEYS = ["waiting", "generating", "tools", "subagents", "compaction", "other"] as const
+
+/** The time bar: indented 2, 60 of the mockup's 72 cells. */
+function timeBar(t: Split, w: number): Line {
+  const keys = KEYS.filter((k) => t[k] > 0)
+  return [["  ", ""], ...bar(keys.map((k) => [t[k], STYLE[k], GLYPH[k]] as const), w - 12)]
+}
+
+/** The Turn tab's legend: two columns, name, seconds and share (mockup). */
+function legendColumns(t: Split): Line[] {
+  const keys = KEYS.filter((k) => t[k] > 0 || k === "waiting" || k === "generating")
+  const pct = percents(keys.map((k) => t[k]))
+  const half = Math.ceil(keys.length / 2)
+  const left = keys.slice(0, half)
+  const right = keys.slice(half)
+  const rw = Math.max(7, ...right.map((k) => NAME[k].length))
+  const cell = (k: (typeof KEYS)[number], i: number, nameW: number, valW: number): Line => [
+    [GLYPH[k], STYLE[k]],
+    [` ${NAME[k].padEnd(nameW)}`, "dim"],
+    [`${dur(t[k]).padStart(valW)}`, "bold"],
+    [(pct[i] === 0 && t[k] > 0 ? "<1%" : `${pct[i]}%`).padStart(4), "dim"],
+  ]
+  const out: Line[] = []
+  for (let r = 0; r < half; r++) {
+    const line: Line = [["  ", ""], ...cell(left[r] as (typeof KEYS)[number], r, 11, 8)]
+    const k = right[r]
+    if (k) line.push(["      ", ""], ...cell(k, half + r, rw, 7))
+    out.push(line)
+  }
+  return out
+}
+
+/** The Session tab's legend: name and time, flowing across lines (mockup). */
+function legendFlow(t: Split, w: number): Line[] {
+  const keys = KEYS.filter((k) => t[k] > 0 || k === "waiting" || k === "generating")
+  const out: Line[] = []
+  let cur: Line = [["  ", ""]]
+  for (const k of keys) {
+    const item: Line = [[GLYPH[k], STYLE[k]], [` ${NAME[k]} `, "dim"], [dur(t[k]), "bold"]]
+    const sep: Line = width(cur) > 2 ? [["  ", ""]] : []
+    if (width(cur) + width(sep) + width(item) > w && width(cur) > 2) {
+      out.push(cur)
+      cur = [["  ", ""], ...item]
+    } else cur = [...cur, ...sep, ...item]
+  }
+  if (width(cur) > 2) out.push(cur)
+  return out
+}
+
 // ---- Turn ------------------------------------------------------------------------
 
-/** The Turn tab. */
+/** The Turn tab, laid out as the mockup. */
 export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] {
   if (!d) return [[["No turn yet in this run. Details start with the next turn.", "dim"]]]
   const out: Line[] = []
   if (d.outcome) out.push([[`This reply ${d.outcome === "interrupted" ? "was interrupted" : "failed"}; figures run to where it stopped.`, "dim"]], [])
 
-  if (d.time && d.totalS !== undefined) out.push(...timeSplit(d.time, d.totalS, w), [])
+  if (d.time && d.totalS !== undefined) {
+    out.push(heading("Where the time went", w, dur(d.totalS)), timeBar(d.time, w), ...legendColumns(d.time), [])
+  }
 
   // Timeline: each step's wait, generation and tools on one time scale.
   const start = d.steps[0]?.createdAt
   const end = start !== undefined && d.totalS !== undefined ? start + d.totalS * 1000 : undefined
   if (start !== undefined && end !== undefined && end > start && d.steps.length > 0) {
-    const cells = w - 8
+    const cells = w - 12
     const at = (ms: number): number => Math.max(0, Math.min(cells, Math.round(((ms - start) / (end - start)) * cells)))
-    out.push(...titled("Timeline", w, "per step"))
+    out.push(heading("Timeline", w, "per step"))
     d.steps.forEach((s, i) => {
       const spans: Array<[number, number, Style, string]> = []
       if (s.firstAt !== undefined) spans.push([s.createdAt, s.firstAt, "wait", GLYPH.waiting])
       if (s.firstAt !== undefined && s.lastAt !== undefined) spans.push([s.firstAt, s.lastAt, "gen", GLYPH.generating])
       for (const t of s.tools) {
-        if (t.start !== undefined && t.end !== undefined) {
-          const sub = t.name === "subagent" || t.name === "task" || t.name === "agent"
-          spans.push([t.start, t.end, sub ? "sub" : "tool", sub ? GLYPH.subagents : GLYPH.tools])
-        }
+        if (t.start === undefined || t.end === undefined) continue
+        const sub = t.name === "subagent" || t.name === "task" || t.name === "agent"
+        spans.push([t.start, t.end, sub ? "sub" : "tool", sub ? GLYPH.subagents : GLYPH.tools])
       }
       const cellsOf: Array<[Style, string]> = Array.from({ length: cells }, () => ["", " "])
       for (const [a, b, style, glyph] of spans) {
@@ -233,7 +230,9 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
         const to = Math.max(from + 1, at(b))
         for (let c = from; c < Math.min(cells, to); c++) cellsOf[c] = [style, glyph]
       }
-      const line: Line = [[`  ${String(i + 1).padStart(2)}  `, "dim"]]
+      // Trailing blanks trimmed, so the line ends where the step does.
+      while (cellsOf.length > 0 && (cellsOf[cellsOf.length - 1] as [Style, string])[1] === " ") cellsOf.pop()
+      const line: Line = [[`  ${String(i + 1)}  `.padEnd(5), "dim"]]
       for (const [style, glyph] of cellsOf) {
         const last = line[line.length - 1] as Seg
         if (last[1] === style && line.length > 1) line[line.length - 1] = [last[0] + glyph, style]
@@ -241,33 +240,35 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
       }
       out.push(line)
     })
-    out.push([["      0s", "dim"], [" ".repeat(Math.max(1, cells - dur(d.totalS as number).length - 2)), ""], [dur(d.totalS as number), "dim"]])
+    const total = dur(d.totalS as number)
+    out.push([["     0s", "dim"], [" ".repeat(Math.max(1, cells - 2 - total.length + 5 - 5)), ""], [total, "dim"]])
     out.push([])
   }
 
-  // Steps: OpenCode's rate, and the engine's own where it read each step.
+  // Steps: the mockup's columns. The engine's own per-step rate appears
+  // where the engine was read per step.
   if (d.steps.length > 0) {
     const eng = d.stepEngine?.some((e) => e?.decodeTokS !== undefined) === true
-    out.push(...titled("Steps", w, String(d.steps.length)))
+    out.push(heading("Steps", w, String(d.steps.length)))
     out.push([
-      ["   #  tokens  ", "dim"],
-      ...(eng ? ([[ENGINE_MARK, "engine"], ["tok/s ", "dim"]] as Line) : []),
-      [" tok/s     ttft   tool", "dim"],
+      ["  #   tokens  ", "dim"],
+      ...(eng ? ([[ENGINE_MARK, "engine"], ["tok/s", "dim"]] as Line) : []),
+      [`${eng ? "   " : ""}tok/s     ttft   tool`, "dim"],
     ])
     d.steps.forEach((s, i) => {
       const tok = s.output + s.reasoning
       const rate = s.streamS && s.streamS > 0 ? n1(tok / s.streamS) : "—"
       const e = d.stepEngine?.[i]?.decodeTokS
       const head: Line = [
-        [`  ${String(i + 1).padStart(2)}  ${n0(tok).padStart(6)}  `, ""],
-        ...(eng ? ([[(e !== undefined ? n1(e) : "—").padStart(6), "engine"], [" ", ""]] as Line) : []),
-        [`${rate.padStart(6)}  ${(s.ttftS !== undefined ? `${s.ttftS.toFixed(2)}s` : "—").padStart(7)}   `, ""],
+        [`  ${String(i + 1)}${n0(tok).padStart(12 - 2 - String(i + 1).length)}`, ""],
+        ...(eng ? ([["    ", ""], [(e !== undefined ? n1(e) : "—").padStart(4), "engine"]] as Line) : []),
+        [`${rate.padStart(eng ? 8 : 10)}${(s.ttftS !== undefined ? `${s.ttftS.toFixed(2)}s` : "—").padStart(9)}   `, ""],
       ]
       const pad = " ".repeat(width(head))
       const tools = s.tools.length > 0 ? s.tools : [undefined]
       tools.forEach((t, j) => {
         const tail: Line = t
-          ? [[t.name.slice(0, 10).padEnd(11), ""], [t.seconds !== undefined ? dur(t.seconds) : t.status, "bold"]]
+          ? [[`${t.name.slice(0, 10).padEnd(10)} ${t.seconds !== undefined ? dur(t.seconds) : t.status}`, ""]]
           : s.finish && s.finish !== "tool-calls"
             ? [[`— ${s.finish}`, "dim"]]
             : []
@@ -277,138 +278,101 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
         s.retries > 0 ? `${s.retries} ${s.retries === 1 ? "retry" : "retries"}` : "",
         s.compactionS ? `waited on compaction ${dur(s.compactionS)}` : "",
       ].filter(Boolean)
-      if (notes.length > 0) out.push([[`        ${notes.join(" · ")}`, "dim"]])
+      if (notes.length > 0) out.push([[`      ${notes.join(" · ")}`, "dim"]])
     })
     const reasons = d.steps.flatMap((s, i) =>
       [s.retryReason ? `step ${i + 1}: ${s.retryReason}` : "", s.error ? `step ${i + 1} failed: ${s.error}` : ""].filter(Boolean)
     )
-    for (const r of reasons) for (const l of wrap(r, w - 4)) out.push([[`  ${l}`, "dim"]])
+    for (const r of reasons) for (const l of wrap(r, w - 2)) out.push([[`  ${l}`, "dim"]])
     out.push([])
   }
 
-  // Tokens: the five kinds, with the cache's share and the context used as bars.
+  // Tokens: generated with its split; prompt and context with a bar each.
   const t = d.tokens
-  out.push(...titled("Tokens", w))
-  // Generated first, as the steps and the engine count it; then its split.
   const produced = t.output + t.reasoning
+  out.push(heading("Tokens", w))
   out.push(
-    gridRow("generated", n0(produced), t.reasoning > 0 ? `${n0(t.output)} answer · ${n0(t.reasoning)} reasoning (${share(t.reasoning, produced)})` : "")
+    row("generated", n0(produced), t.reasoning > 0 ? `  ${n0(t.output)} answer · ${n0(t.reasoning)} reasoning (${share(t.reasoning, produced)})` : "")
   )
   const prompt = t.input + t.cacheRead
   if (prompt > 0) {
-    const head = valueRow("prompt", n0(prompt))
     out.push([
-      ...head,
-      [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-      ...bar([[t.input, "gen", BAR], [t.cacheRead, "wait", BAR]], rowBar(w)),
-      [`  ${n0(t.input)} fresh · ${n0(t.cacheRead)} cached (${share(t.cacheRead, prompt)})`, "dim"],
+      ...row("input", n0(t.input), " fresh  "),
+      ...bar([[t.input, "gen", GLYPH.generating], [t.cacheRead, "wait", GLYPH.waiting]], sc(24, w)),
+      [`  ${n0(t.cacheRead)} cached (${share(t.cacheRead, prompt)})`, "dim"],
     ])
   }
-  if (t.cacheWrite > 0) out.push(gridRow("", n0(t.cacheWrite), "written to cache"))
+  if (t.cacheWrite > 0) out.push(row("", n0(t.cacheWrite), " written to cache"))
   if (d.context) {
-    const head = valueRow("context", n0(d.context.used))
     const tail: Line = d.context.limit
       ? [
-          [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-          ...bar([[d.context.used, "gen", BAR], [Math.max(0, d.context.limit - d.context.used), "wait", BAR]], rowBar(w)),
-          [`  ${share(d.context.used, d.context.limit)} of ${n0(d.context.limit)}`, "dim"],
+          [` of ${n0(d.context.limit)}  `, "dim"],
+          ...bar([[d.context.used, "gen", GLYPH.generating], [Math.max(0, d.context.limit - d.context.used), "wait", GLYPH.waiting]], sc(24, w)),
+          [`  ${share(d.context.used, d.context.limit)}`, "dim"],
         ]
       : []
-    out.push([...head, ...tail])
+    out.push([...row("context", n0(d.context.used)), ...tail])
   }
-  if (d.cost !== undefined) out.push(gridRow("cost", `$${d.cost.toFixed(4)}`))
+  if (d.cost !== undefined) out.push(row("cost", `$${d.cost.toFixed(4)}`))
   out.push([])
 
-  // Engine: its own figures only, packed a few to a line, or which were
-  // left out and why.
+  // Engine: its own figures, a few to a line; or which were left out and why.
   if (d.engineRows.length > 0) {
-    const title = `${ENGINE_MARK} ${d.engine}`
-    const note = " measured by the engine"
-    out.push([[title, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - title.length - 1 - note.length)), "rule"], [note, "dim"]], [])
-    out.push(...gridRows(d.engineRows, w))
-    if (d.compactionEngine) for (const c of d.compactionEngine) out.push(gridRow("compaction", "", `${c}, taken out of the above`))
+    out.push(heading(`${ENGINE_MARK} ${d.engine}`, w, "measured by the engine"))
+    out.push(...packRows(d.engineRows, w))
+    if (d.compactionEngine) for (const c of d.compactionEngine) out.push(row("compaction", c, "  taken out of the above"))
   } else {
-    out.push(...titled(d.engine, w))
+    out.push(heading(d.engine, w))
     const note = d.engineNote && d.engineNote.length > 0 ? `${d.engine}'s figures were left out: ${d.engineNote.join(" ")}` : "no engine telemetry for this provider"
     for (const l of wrap(note, w)) out.push([[l, "dim"]])
   }
 
   if (d.subagents) {
-    out.push([], ...titled("Sub-agents", w))
-    out.push(gridRow("count", n0(d.subagents.count), `${n0(d.subagents.tokens)} tok · ${dur(d.subagents.spanS)}`))
-    if (d.subagents.cost !== undefined) out.push(gridRow("cost", `$${d.subagents.cost.toFixed(4)}`))
+    out.push([], heading("Sub-agents", w))
+    out.push(row("count", n0(d.subagents.count), `  ${n0(d.subagents.tokens)} tok · ${dur(d.subagents.spanS)}`))
+    if (d.subagents.cost !== undefined) out.push(row("cost", `$${d.subagents.cost.toFixed(4)}`))
   }
   return out
 }
 
 /**
- * Label/value rows in a two-column grid: each pair's label in a fixed column,
- * its value beside it, the second column starting at half the width. A row
- * with an empty label continues the one above; acceptance by depth folds
- * into `93/87/82% by depth`.
- */
-export function gridRows(rows: ReadonlyArray<readonly [string, string]>, w: number): Line[] {
-  const groups: Array<{ label: string; value: string; rest: string }> = []
-  let cur: { label: string; values: string[] } | undefined
-  const flush = (): void => {
-    if (!cur) return
-    const depths = cur.values.map((v) => /^(\d+)% at depth \d+$/.exec(v)?.[1])
-    if (depths.length > 1 && depths.every((x) => x !== undefined)) groups.push({ label: cur.label, value: `${depths.join("/")}%`, rest: "by depth" })
-    else groups.push({ label: cur.label, value: cur.values[0] ?? "", rest: cur.values.slice(1).join(" ") })
-  }
-  for (const [label, value] of rows) {
-    if (label || !cur) {
-      flush()
-      cur = { label, values: [value] }
-    } else cur.values.push(value)
-  }
-  flush()
-  const half = Math.floor(w / 2)
-  const cell = (g: { label: string; value: string; rest: string }, cw: number): Line => {
-    const line: Line = [[g.label.padEnd(LABEL), "dim"], [g.value, "bold"]]
-    if (g.rest) line.push([` ${g.rest}`, "dim"])
-    const used = width(line)
-    return used < cw ? [...line, [" ".repeat(cw - used), ""]] : line
-  }
-  const out: Line[] = []
-  for (let i = 0; i < groups.length; i += 2) {
-    const a = groups[i] as { label: string; value: string; rest: string }
-    const b = groups[i + 1]
-    out.push(b ? [...cell(a, half), ...cell(b, 0)] : cell(a, 0))
-  }
-  return out
-}
-
-/**
- * Label/value rows packed several to a line: `speed 41.2 tok/s   prefill 475
- * tok/s   ttft 17.37s`. A row with an empty label continues the one above;
- * acceptance by depth (`93% at depth 1`, ...) folds into `93/87/82% by depth`.
+ * Label/value rows packed several to a line, as the mockup's engine section:
+ * `speed 41.2 tok/s     prefill 475 tok/s     ttft 17.37s`. A row with an
+ * empty label continues the one above; acceptance by depth folds into
+ * `93/87/82% by depth`.
  */
 export function packRows(rows: ReadonlyArray<readonly [string, string]>, w: number): Line[] {
-  const groups: Array<{ label: string; values: string[] }> = []
+  const all: Array<{ label: string; values: string[] }> = []
   for (const [label, value] of rows) {
-    if (label || groups.length === 0) groups.push({ label, values: [value] })
-    else (groups[groups.length - 1] as { values: string[] }).values.push(value)
+    if (label || all.length === 0) all.push({ label, values: [value] })
+    else (all[all.length - 1] as { values: string[] }).values.push(value)
   }
-  const segs = groups.map(({ label, values }): Line => {
+  // The mockup's order: rates first, then speculative decoding. The token
+  // count is left out: the Tokens section already has it.
+  const ORDER = ["speed", "prefill", "ttft", "MTP", "accepted", "draft"]
+  const rank = (l: string): number => (ORDER.includes(l) ? ORDER.indexOf(l) : ORDER.length)
+  const groups = all.filter((g) => g.label !== "tokens").sort((a, b) => rank(a.label) - rank(b.label))
+  const segs = groups.map(({ label, values }): { label: string; value: Line } => {
     const depths = values.map((v) => /^(\d+)% at depth \d+$/.exec(v)?.[1])
     if (depths.length > 1 && depths.every((x) => x !== undefined)) {
-      return [[label, "dim"], [" ", ""], [`${depths.join("/")}%`, "bold"], [" by depth", "dim"]]
+      return { label, value: [[`${depths.join("/")}%`, "bold"], [" by depth", "dim"]] }
     }
     const [first, ...rest] = values
-    return [[label, "dim"], [" ", ""], [first ?? "", "bold"], ...(rest.length > 0 ? ([[` ${rest.join(" ")}`, "dim"]] as Line) : [])]
+    return { label, value: [[first ?? "", "bold"], ...(rest.length > 0 ? ([[`  ${rest.join(" ")}`, "dim"]] as Line) : [])] }
   })
   const out: Line[] = []
   let cur: Line = []
+  let prev = ""
   for (const g of segs) {
-    const [labelSeg, , ...value] = g
-    const lead: Line = cur.length === 0 ? [[(labelSeg as Seg)[0].padEnd(LABEL), "dim"], ...value] : [["   ", ""], ...g]
-    if (cur.length > 0 && width(cur) + width(lead) > w) {
+    const first: Line = [[g.label.padEnd(LABEL), "dim"], ...g.value]
+    const next: Line = [["     ", ""], [`${g.label} `, "dim"], ...g.value]
+    const newGroup = prev !== "" && rank(prev) <= 2 && rank(g.label) > 2
+    prev = g.label
+    if (cur.length === 0) cur = first
+    else if (newGroup || width(cur) + width(next) > w) {
       out.push(cur)
-      cur = [[(labelSeg as Seg)[0].padEnd(LABEL), "dim"], ...value]
-    } else {
-      cur = [...cur, ...lead]
-    }
+      cur = first
+    } else cur = [...cur, ...next]
   }
   if (cur.length > 0) out.push(cur)
   return out
@@ -416,38 +380,38 @@ export function packRows(rows: ReadonlyArray<readonly [string, string]>, w: numb
 
 // ---- Session ------------------------------------------------------------------------
 
-/** The Session tab. */
+/** The Session tab, laid out as the mockup. */
 export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): Line[] {
   if (!f) return [[["No turns yet in this session.", "dim"]]]
   const out: Line[] = []
   const s = f.summary
 
-  out.push(...titled("Speed", w, "generation only"))
+  out.push(heading("Speed", w, "tok/s"))
   if (s.genTokS !== undefined) {
     const spread =
       f.rates.length > 1
-        ? `  ·  min ${n1(quantile(f.rates, 0) as number)} · median ${n1(quantile(f.rates, 0.5) as number)} · p90 ${n1(quantile(f.rates, 0.9) as number)} · max ${n1(quantile(f.rates, 1) as number)}`
+        ? `   min ${n1(quantile(f.rates, 0) as number)} · median ${n1(quantile(f.rates, 0.5) as number)} · p90 ${n1(quantile(f.rates, 0.9) as number)} · max ${n1(quantile(f.rates, 1) as number)}`
         : ""
-    out.push(gridRow("average", n1(s.genTokS), `tok/s${spread}`))
+    out.push(row("average", n1(s.genTokS), spread))
   }
   const spark = sparkline(f.rates.slice(0, 24).reverse())
-  if (spark) out.push(gridRow("trend", "", [[spark, "accent"], [`   last ${Math.min(24, f.rates.length)} turns`, "dim"]]))
+  if (spark) out.push([["trend".padEnd(LABEL), "dim"], [spark, "accent"], [`   last ${Math.min(24, f.rates.length)} turns`, "dim"]])
   if (f.ttfts.length > 0) {
-    const more = f.ttfts.length > 1 ? `median · p90 ${(quantile(f.ttfts, 0.9) as number).toFixed(2)}s · max ${(quantile(f.ttfts, 1) as number).toFixed(2)}s` : ""
-    out.push(gridRow("ttft", `${(quantile(f.ttfts, 0.5) as number).toFixed(2)}s`, more.trim()))
+    const more = f.ttfts.length > 1 ? `  median · p90 ${(quantile(f.ttfts, 0.9) as number).toFixed(2)}s · max ${(quantile(f.ttfts, 1) as number).toFixed(2)}s` : ""
+    out.push(row("ttft", `${(quantile(f.ttfts, 0.5) as number).toFixed(2)}s`, more))
   }
   out.push([])
 
-  if (f.time) out.push(...timeSplit(f.time, f.time.total, w), [])
+  if (f.time) out.push(heading("Where the time went", w, dur(f.time.total)), timeBar(f.time, w), ...legendFlow(f.time, w), [])
 
   if (f.tools.length > 0) {
     const shown = f.tools.slice(0, 8)
     const most = (shown[0] as { s: number }).s
-    out.push(...titled("Tools by time", w, `${n0(f.toolCalls)} calls`))
+    out.push(heading("Tools by time", w, `${n0(f.toolCalls)} calls`))
     for (const t of shown) {
       out.push([
-        [`  ${t.name.slice(0, 10).padEnd(11)}`, "dim"],
-        ...bar([[t.s, "tool", BAR], [Math.max(0, most - t.s), "", " "]], rowBar(w)),
+        [`  ${t.name.slice(0, 10).padEnd(10)}`, "dim"],
+        ...bar([[t.s, "tool", GLYPH.tools], [Math.max(0, most - t.s), "", " "]], sc(30, w)),
         [`  ${dur(t.s).padStart(7)}`, "bold"],
         [`  ${n0(t.n)} ${t.n === 1 ? "call" : "calls"}`, "dim"],
       ])
@@ -456,48 +420,39 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     out.push([])
   }
 
-  out.push(...titled("Coverage", w, "turns with the engine's own figures"))
-  out.push(
-    gridRow("engine", `${n0(f.coverage.engine)}/${n0(f.coverage.total)}`, [
-      ...bar([[f.coverage.engine, "gen", BAR], [f.coverage.total - f.coverage.engine, "wait", BAR]], rowBar(w)),
-      [`  ${share(f.coverage.engine, f.coverage.total)} of turns`, "dim"],
-    ])
-  )
-  f.coverage.without.forEach(({ label, n }, i) => out.push(gridRow(i === 0 ? "without" : "", n0(n), label)))
+  out.push(heading("Coverage", w))
+  out.push([
+    ...row("engine", `${n0(f.coverage.engine)} of ${n0(f.coverage.total)} turns`, "   "),
+    ...bar([[f.coverage.engine, "gen", GLYPH.generating], [f.coverage.total - f.coverage.engine, "wait", GLYPH.waiting]], sc(20, w)),
+  ])
+  f.coverage.without.forEach(({ label, n }, i) => out.push([[(i === 0 ? "without" : "").padEnd(LABEL), "dim"], [`${n0(n)} ${label}`, "dim"]]))
   out.push([])
 
-  out.push(...titled("Tokens", w))
+  out.push(heading("Tokens", w))
   const gen = f.tokens.output + f.tokens.reasoning
-  out.push(
-    gridRow("generated", n0(gen), f.tokens.reasoning > 0 ? `${n0(f.tokens.output)} answer · ${n0(f.tokens.reasoning)} reasoning (${share(f.tokens.reasoning, gen)})` : "")
-  )
+  out.push(row("generated", n0(gen), f.tokens.reasoning > 0 ? `  ${n0(f.tokens.output)} answer · ${n0(f.tokens.reasoning)} reasoning` : ""))
   if (f.tokens.input !== undefined || f.tokens.cacheRead !== undefined) {
     const fresh = f.tokens.input ?? 0
     const cached = f.tokens.cacheRead ?? 0
-    out.push(
-      gridRow("prompt", n0(fresh + cached), [
-        ...bar([[fresh, "gen", BAR], [cached, "wait", BAR]], rowBar(w)),
-        [`  ${n0(fresh)} fresh · ${n0(cached)} cached (${share(cached, fresh + cached)})`, "dim"],
-      ])
-    )
+    out.push(row("input", n0(fresh), ` fresh   ${n0(cached)} cached  (${share(cached, fresh + cached)} hit)`))
   }
-  if (f.tokens.cacheWrite > 0) out.push(gridRow("", n0(f.tokens.cacheWrite), "written to cache"))
-  out.push(gridRow("turns", n0(f.turns), `${n0(f.steps)} steps · ${dur(f.elapsedS)}${f.cost !== undefined ? ` · $${f.cost.toFixed(4)}` : ""}`))
+  if (f.tokens.cacheWrite > 0) out.push(row("", n0(f.tokens.cacheWrite), " written to cache"))
 
   if (f.retryReasons.length > 0) {
-    out.push([], ...titled("Retries", w, String(s.retries)))
+    out.push([], heading("Retries", w, String(s.retries)))
     for (const { reason, n } of f.retryReasons) for (const l of wrap(`${n}× ${reason}`, w - 2)) out.push([[`  ${l}`, "dim"]])
   }
-
   if (s.engine && (s.engine.mtpX !== undefined || s.engine.draftAccept !== undefined || s.engine.prefillTokS !== undefined)) {
-    out.push([], [[`${ENGINE_MARK} Engine averages`, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - 18)), "rule"]], [])
-    if (s.engine.mtpX !== undefined) out.push(gridRow("MTP", `${s.engine.mtpX.toFixed(2)}x`, "average"))
-    if (s.engine.draftAccept !== undefined) out.push(gridRow("draft", `${Math.round(s.engine.draftAccept * 100)}%`, "accepted, average"))
-    if (s.engine.prefillTokS !== undefined) out.push(gridRow("prefill", n0(s.engine.prefillTokS), "tok/s average"))
+    out.push([], heading(`${ENGINE_MARK} Engine averages`, w))
+    const rows: Array<[string, string]> = []
+    if (s.engine.mtpX !== undefined) rows.push(["MTP", `${s.engine.mtpX.toFixed(2)}x`])
+    if (s.engine.draftAccept !== undefined) rows.push(["draft", `${Math.round(s.engine.draftAccept * 100)}% accepted`])
+    if (s.engine.prefillTokS !== undefined) rows.push(["prefill", `${n0(s.engine.prefillTokS)} tok/s`])
+    out.push(...packRows(rows, w))
   }
   if (s.subagents) {
-    out.push([], ...titled("Sub-agents", w))
-    out.push(gridRow("count", n0(s.subagents.count), `${n0(s.subagents.tokens)} tok${s.subagents.cost !== undefined ? ` · $${s.subagents.cost.toFixed(4)}` : ""}`))
+    out.push([], heading("Sub-agents", w))
+    out.push(row("count", n0(s.subagents.count), `  ${n0(s.subagents.tokens)} tok${s.subagents.cost !== undefined ? ` · $${s.subagents.cost.toFixed(4)}` : ""}`))
   }
   return out
 }
@@ -505,10 +460,10 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
 // ---- History ------------------------------------------------------------------------
 
 /**
- * The History tab: one row per turn in fixed columns, never wrapped. Scope is
- * this session or every session; with every session, a model column appears,
- * since that is when the model varies. Cost and cache columns appear only
- * when some turn in view has them.
+ * The History tab: one row per turn in fixed columns, spread across the
+ * width, never wrapped. Scope is this session or every session; with every
+ * session, a model column appears. Cost and cache columns appear only when
+ * some turn in view has them, tools only when some turn used one.
  */
 export function historyTabLines(
   turns: readonly TurnRecord[],
@@ -520,9 +475,9 @@ export function historyTabLines(
   if (rows.length === 0) return [[[scope === "all" ? "No turns recorded yet." : "No turns in this session yet.", "dim"]]]
   const showModel = scope === "all"
   const showCost = rows.some((t) => typeof t.cost === "number" && t.cost > 0)
-  // Across every session the model column needs the room; cache and tool
-  // counts stay in the session view, where the model is one.
   const showCache = !showModel && rows.some((t) => (t.cached ?? 0) > 0)
+  // Across every session the model column needs the room; tool counts stay
+  // in the session view.
   const showTools = !showModel && rows.some((t) => Object.values(t.tools ?? {}).some((x) => x.n > 0))
 
   // Headline: the scope's totals, and its generation speed on the newest model.
@@ -550,34 +505,46 @@ export function historyTabLines(
     [],
   ]
 
-  // Columns, fitted to the width: the model column takes what is left.
-  const fixed = 2 + 6 + 8 + 8 + 9 + 9 + (showTools ? 6 : 0) + 3 + (showCost ? 9 : 0) + (showCache ? 9 : 0)
-  const modelW = showModel ? Math.max(8, Math.min(22, w - fixed)) : 0
-  const header: Line = [
-    [
-      `  ${"time".padEnd(6)}${showModel ? "model".padEnd(modelW) : ""}${"tok/s".padStart(8)}${"tokens".padStart(8)}${"ttft".padStart(9)}${"total".padStart(9)}${showTools ? "tools".padStart(6) : ""}${showCost ? "cost".padStart(9) : ""}${showCache ? "cached".padStart(9) : ""}  `,
-      "dim",
-    ],
-    [ENGINE_MARK, "engine"],
+  // Columns: name, width, right-aligned, style. The spare width is shared
+  // out between them, so the table spans the dialog.
+  type Col = { name: string; w: number; right: boolean; cell: (t: TurnRecord) => Seg }
+  // The model column takes what the others leave, at two cells between each.
+  const others = 2 + 5 + 6 + 7 + 7 + 8 + 1 + (showTools ? 5 : 0) + (showCost ? 8 : 0) + (showCache ? 7 : 0)
+  const nCols = 6 + (showModel ? 1 : 0) + (showTools ? 1 : 0) + (showCost ? 1 : 0) + (showCache ? 1 : 0)
+  const modelW = Math.max(8, Math.min(24, w - others - 2 * (nCols - 1)))
+  const cols: Col[] = [
+    { name: "time", w: 5, right: false, cell: (t) => [clock(t.at), ""] },
+    ...(showModel
+      ? ([{ name: "model", w: modelW, right: false, cell: (t: TurnRecord) => [midCut(t.model, modelW), "dim"] as Seg }] as Col[])
+      : []),
+    { name: "tok/s", w: 6, right: true, cell: (t) => [t.rate !== undefined && t.rateWindow !== "whole" && !t.outcome ? n1(t.rate) : "—", "bold"] },
+    { name: "tokens", w: 7, right: true, cell: (t) => [t.tokens > 0 ? n0(t.tokens) : "—", ""] },
+    { name: "ttft", w: 7, right: true, cell: (t) => [t.ttft !== undefined ? `${t.ttft.toFixed(2)}s` : "—", ""] },
+    { name: "total", w: 8, right: true, cell: (t) => [t.totalS !== undefined ? dur(t.totalS) : "—", ""] },
+    ...(showTools
+      ? ([{ name: "tools", w: 5, right: true, cell: (t: TurnRecord) => [String(Object.values(t.tools ?? {}).reduce((a, x) => a + x.n, 0) || ""), ""] as Seg }] as Col[])
+      : []),
+    ...(showCost ? ([{ name: "cost", w: 8, right: true, cell: (t: TurnRecord) => [t.cost ? `$${t.cost.toFixed(4)}` : "", ""] as Seg }] as Col[]) : []),
+    ...(showCache ? ([{ name: "cached", w: 7, right: true, cell: (t: TurnRecord) => [t.cached ? n0(t.cached) : "", ""] as Seg }] as Col[]) : []),
+    { name: ENGINE_MARK, w: 1, right: true, cell: (t) => (t.source === "engine" ? [ENGINE_MARK, "engine"] : ["·", "dim"]) },
   ]
-  out.push(header, [["─".repeat(w), "rule"]])
+  const base = 2 + cols.reduce((a, c) => a + c.w, 0)
+  const gap = Math.max(2, Math.floor((w - base) / (cols.length - 1)))
+  const cell = (c: Col, text: string, i: number): string => {
+    const t = c.right ? text.padStart(c.w) : text.padEnd(c.w)
+    return i === 0 ? t : " ".repeat(gap) + t
+  }
+  out.push([
+    ["  ", ""],
+    ...cols.map((c, i): Seg => [cell(c, c.name, i), c.name === ENGINE_MARK ? "engine" : "dim"]),
+  ])
+  out.push([["─".repeat(w), "rule"]])
   const notes: string[] = []
   for (const t of rows.slice(0, 200)) {
-    const calls = Object.values(t.tools ?? {}).reduce((a, x) => a + x.n, 0)
-    // Cut from the middle: a model's distinguishing part is often its end.
-    const keep = modelW - 2
-    const model =
-      t.model.length > modelW - 1 ? `${t.model.slice(0, Math.ceil(keep / 3))}…${t.model.slice(t.model.length - Math.floor((keep * 2) / 3))}` : t.model
-    out.push([
-      [`  ${clock(t.at).padEnd(6)}`, ""],
-      ...(showModel ? ([[model.padEnd(modelW), "dim"]] as Line) : []),
-      [(t.rate !== undefined && t.rateWindow !== "whole" && !t.outcome ? n1(t.rate) : "—").padStart(8), "bold"],
-      [`${(t.tokens > 0 ? n0(t.tokens) : "—").padStart(8)}${(t.ttft !== undefined ? `${t.ttft.toFixed(2)}s` : "—").padStart(9)}${(t.totalS !== undefined ? dur(t.totalS) : "—").padStart(9)}${showTools ? (calls > 0 ? String(calls) : "").padStart(6) : ""}`, ""],
-      ...(showCost ? ([[(t.cost ? `$${t.cost.toFixed(4)}` : "").padStart(9), ""]] as Line) : []),
-      ...(showCache ? ([[(t.cached ? n0(t.cached) : "").padStart(9), ""]] as Line) : []),
-      ["  ", ""],
-      t.source === "engine" ? [ENGINE_MARK, "engine"] : ["·", "dim"],
-    ])
+    out.push([["  ", ""], ...cols.map((c, i): Seg => {
+      const [text, style] = c.cell(t)
+      return [cell(c, text, i), style]
+    })])
     if (t.outcome) notes.push(`${clock(t.at)} ${t.outcome}`)
     else if (t.source !== "engine" && t.skip && t.skip !== "no-adapter") notes.push(`${clock(t.at)} ${SKIP_LABEL[t.skip]}`)
   }
@@ -586,4 +553,11 @@ export function historyTabLines(
     for (const l of wrap(notes.slice(0, 6).join(" · "), w - 2)) out.push([[`  ${l}`, "dim"]])
   }
   return out
+}
+
+/** A long name cut in the middle: a model's distinguishing part is often its end. */
+function midCut(s: string, n: number): string {
+  if (s.length <= n) return s
+  const keep = n - 1
+  return `${s.slice(0, Math.ceil(keep / 3))}…${s.slice(s.length - Math.floor((keep * 2) / 3))}`
 }
