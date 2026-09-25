@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.4.0] – 2026-09-25
 ### Added
 - A **details dialog**, opened by `details ›` under the sidebar boxes,
   `ctrl+shift+d` or `/headsup`, and closed the same way or with `esc`. Last
