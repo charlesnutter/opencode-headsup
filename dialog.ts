@@ -78,6 +78,9 @@ export function gridRow(label: string, value: string, tail: Line | string = []):
   return rest.length > 0 ? [...head, [" ".repeat(BAR_AT - width(head)), ""], ...rest] : head
 }
 
+/** A row's bar grows with the width: about 40% of what follows the value column. */
+const rowBar = (w: number): number => Math.max(20, Math.floor((w - BAR_AT) * 0.4))
+
 /** A heading and the blank row under it: every section opens this way. */
 export const titled = (title: string, w: number, right = ""): Line[] => [heading(title, w, right), []]
 
@@ -116,10 +119,11 @@ export function bar(parts: ReadonlyArray<readonly [value: number, style: Style, 
   return parts.flatMap(([, style, glyph], i) => ((n[i] as number) > 0 ? [[glyph.repeat(n[i] as number), style] as const] : []))
 }
 
-// Bars are drawn with a line glyph, not full blocks: a full block fills its
-// whole row and touched the text above and below (measured: the dialog read
-// as cramped). Parts are told apart by colour; the legend marks each with ■.
-const BAR = "━"
+// Bars are a lower half block: a full block filled its whole row and touched
+// the text above and below (the dialog read as cramped), and a line (━) read
+// as a hairline in the terminal's font. Parts are told apart by colour; the
+// legend marks each with ■.
+const BAR = "▄"
 const GLYPH = { waiting: BAR, generating: BAR, tools: BAR, subagents: BAR, compaction: BAR, other: BAR } as const
 const STYLE: Record<keyof typeof GLYPH, Style> = {
   waiting: "wait",
@@ -296,7 +300,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
     out.push([
       ...head,
       [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-      ...bar([[t.input, "gen", BAR], [t.cacheRead, "wait", BAR]], 20),
+      ...bar([[t.input, "gen", BAR], [t.cacheRead, "wait", BAR]],, rowBar(w)),
       [`  ${n0(t.input)} fresh · ${n0(t.cacheRead)} cached (${share(t.cacheRead, prompt)})`, "dim"],
     ])
   }
@@ -306,7 +310,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
     const tail: Line = d.context.limit
       ? [
           [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-          ...bar([[d.context.used, "gen", BAR], [Math.max(0, d.context.limit - d.context.used), "wait", BAR]], 20),
+          ...bar([[d.context.used, "gen", BAR], [Math.max(0, d.context.limit - d.context.used), "wait", BAR]],, rowBar(w)),
           [`  ${share(d.context.used, d.context.limit)} of ${n0(d.context.limit)}`, "dim"],
         ]
       : []
@@ -443,7 +447,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     for (const t of shown) {
       out.push([
         [`  ${t.name.slice(0, 10).padEnd(11)}`, "dim"],
-        ...bar([[t.s, "tool", BAR], [Math.max(0, most - t.s), "", " "]], 28),
+        ...bar([[t.s, "tool", BAR], [Math.max(0, most - t.s), "", " "]],, rowBar(w)),
         [`  ${dur(t.s).padStart(7)}`, "bold"],
         [`  ${n0(t.n)} ${t.n === 1 ? "call" : "calls"}`, "dim"],
       ])
@@ -455,7 +459,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
   out.push(...titled("Coverage", w, "turns with the engine's own figures"))
   out.push(
     gridRow("engine", `${n0(f.coverage.engine)}/${n0(f.coverage.total)}`, [
-      ...bar([[f.coverage.engine, "gen", BAR], [f.coverage.total - f.coverage.engine, "wait", BAR]], 20),
+      ...bar([[f.coverage.engine, "gen", BAR], [f.coverage.total - f.coverage.engine, "wait", BAR]],, rowBar(w)),
       [`  ${share(f.coverage.engine, f.coverage.total)} of turns`, "dim"],
     ])
   )
@@ -472,7 +476,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     const cached = f.tokens.cacheRead ?? 0
     out.push(
       gridRow("prompt", n0(fresh + cached), [
-        ...bar([[fresh, "gen", BAR], [cached, "wait", BAR]], 20),
+        ...bar([[fresh, "gen", BAR], [cached, "wait", BAR]],, rowBar(w)),
         [`  ${n0(fresh)} fresh · ${n0(cached)} cached (${share(cached, fresh + cached)})`, "dim"],
       ])
     )

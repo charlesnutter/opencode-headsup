@@ -521,7 +521,9 @@ export default Plugin.define({
               }
               if (inner !== undefined) {
                 setDetails((d) => {
-                  d.w = Math.max(CONTENT_WIDTH, Math.min(96, inner))
+                  // The whole of the dialog's width: a cap left a wide empty
+                  // strip on the right of an xlarge dialog (measured).
+                  d.w = Math.max(CONTENT_WIDTH, Math.min(160, inner))
                 })
               }
               dbg(`details: dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; content ${details.w} wide; ${lines().length} lines`)
