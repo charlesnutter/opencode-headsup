@@ -442,49 +442,6 @@ export function engineItems(rows: ReadonlyArray<readonly [string, string]>): Arr
   return items.sort((a, b) => rank(a.label) - rank(b.label))
 }
 
-/**
- * Label/value rows packed several to a line, as the mockup's engine section:
- * `speed 41.2 tok/s     prefill 475 tok/s     ttft 17.37s`. A row with an
- * empty label continues the one above; acceptance by depth folds into
- * `93/87/82% by depth`.
- */
-export function packRows(rows: ReadonlyArray<readonly [string, string]>, w: number): Line[] {
-  const all: Array<{ label: string; values: string[] }> = []
-  for (const [label, value] of rows) {
-    if (label || all.length === 0) all.push({ label, values: [value] })
-    else (all[all.length - 1] as { values: string[] }).values.push(value)
-  }
-  // The mockup's order: rates first, then speculative decoding. The token
-  // count is left out: the Tokens section already has it.
-  const ORDER = ["speed", "prefill", "ttft", "MTP", "accepted", "draft"]
-  const rank = (l: string): number => (ORDER.includes(l) ? ORDER.indexOf(l) : ORDER.length)
-  const groups = all.filter((g) => g.label !== "tokens").sort((a, b) => rank(a.label) - rank(b.label))
-  const segs = groups.map(({ label, values }): { label: string; value: Line } => {
-    const depths = values.map((v) => /^(\d+)% at depth \d+$/.exec(v)?.[1])
-    if (depths.length > 1 && depths.every((x) => x !== undefined)) {
-      return { label, value: [[`${depths.join("/")}%`, "bold"], [" by depth", "dim"]] }
-    }
-    const [first, ...rest] = values
-    return { label, value: [[first ?? "", "bold"], ...(rest.length > 0 ? ([[`  ${rest.join(" ")}`, "dim"]] as Line) : [])] }
-  })
-  const out: Line[] = []
-  let cur: Line = []
-  let prev = ""
-  for (const g of segs) {
-    const first: Line = [[g.label.padEnd(LABEL), "dim"], ...g.value]
-    const next: Line = [["     ", ""], [`${g.label} `, "dim"], ...g.value]
-    const newGroup = prev !== "" && rank(prev) <= 2 && rank(g.label) > 2
-    prev = g.label
-    if (cur.length === 0) cur = first
-    else if (newGroup || width(cur) + width(next) > w) {
-      out.push(cur)
-      cur = first
-    } else cur = [...cur, ...next]
-  }
-  if (cur.length > 0) out.push(cur)
-  return out
-}
-
 // ---- Session ------------------------------------------------------------------------
 
 /** The Session tab, laid out as the mockup. */
@@ -608,7 +565,7 @@ export function historyTabLines(
   const out: Line[] = [
     [
       ["  ", ""],
-      [`${n0(rows.length)} turns`, "bold"],
+      [`${n0(rows.length)} ${rows.length === 1 ? "turn" : "turns"}`, "bold"],
       [" · ", "dim"],
       [`${n0(tokens)} tok`, "bold"],
       ...(genS > 0 ? ([[" · ", "dim"], [`${n1(genTok / genS)} tok/s`, "bold"], [" avg", "dim"]] as Line) : []),
