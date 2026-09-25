@@ -249,4 +249,12 @@ test("the roll-up carries its sub-agents' steps -- one engine request each", () 
   assert.equal(rollupSubagents([child({ steps: undefined })], ["ses_child"], 0, 40_000).steps, 1)
 })
 
+test("an unfinished reply counts toward no speed or time split", () => {
+  // OpenCode records no tokens for an interrupted step: 0 tokens over 6s.
+  const s = summariseSession([row({ outcome: "interrupted", tokens: 0, streamS: 6 }), row({ tokens: 100, streamS: 2 })], SID)
+  assert.equal(s.genTokS, 50)
+  assert.equal(s.trend.length, 1)
+  assert.equal(s.turns, 2)
+})
+
 console.log(`\n${passed} passed`)

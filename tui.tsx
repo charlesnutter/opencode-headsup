@@ -917,7 +917,14 @@ export default Plugin.define({
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
         // magnitude when it does. Split to fit the box's 32 cells.
-        if (opts.outcome) line.notes.push(opts.outcome)
+        if (opts.outcome) {
+          // OpenCode records no tokens for a step it stopped mid-stream
+          // (measured: an interrupted reply's step came back 0/error after 7s
+          // of thinking), so a 0 here is unknown, not none.
+          const out0 = (info.tokens?.output ?? 0) + (info.tokens?.reasoning ?? 0)
+          if (out0 === 0) line.rows = line.rows.filter(([label]) => label !== "tokens" && label !== "speed")
+          line.notes.push(opts.outcome)
+        }
         else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
         else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
       }

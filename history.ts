@@ -124,6 +124,11 @@ export interface Summary {
 
 /** A turn's streaming time: recorded, or derived from an older row's rate. */
 export function streamOf(t: TurnRecord): number | undefined {
+  // A reply that did not finish has no tokens recorded for its last step, so
+  // its tokens over its streaming time would understate the speed (measured:
+  // an interrupted turn, 0 tokens over 6s of streaming, halved a session's
+  // average). It counts toward nothing that divides by streaming time.
+  if (t.outcome) return undefined
   if (t.streamS !== undefined && t.streamS > 0) return t.streamS
   // Rows recorded before streamS existed carry a generation rate whose
   // window is tokens / rate. A whole-turn rate is not generation, so no.
