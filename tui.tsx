@@ -34,6 +34,7 @@ import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
 import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
+import { buildTurnDetail, turnSections, type TurnDetail, type Section } from "./detail"
 
 import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -185,6 +186,11 @@ export default Plugin.define({
 
     // What the sidebar shows, one line per session (see panels.ts). Reactive:
     // writing it re-renders the slot. Memory-scoped, so it dies with the TUI.
+    // Each session's last turn in full, for the details dialog. Memory, like
+    // the panels: the dialog describes this run; history keeps the summary.
+    const [turnDetail, setTurnDetail] = ctx.storage.memory<{ bySession: Record<string, TurnDetail> }>("turnDetail", {
+      initial: { bySession: {} },
+    })
     const [panel, setPanel] = ctx.storage.memory<Panels>("panels", {
       initial: emptyPanels(),
     })
@@ -326,9 +332,6 @@ export default Plugin.define({
         stored === PLACEHOLDER ? { engine: "last turn", rows: [], notes: ["no turn yet"] } : decodeView(stored)
       const summary = summariseSession(history.turns, sessionID)
       const sessView: TurnView = summary ? sessionView(summary) : { engine: "Session", rows: [], notes: ["no turns yet"] }
-      // Filler, so the body is taller than any terminal and has to scroll.
-      const filler = (tag: string): Array<readonly [string, string]> =>
-        Array.from({ length: 40 }, (_, i) => [i === 0 ? "stub" : "", `${tag} row ${i + 1}`] as const)
       let scroll: { scrollBy?: (d: number) => void; width?: number; height?: number; focus?: () => void } | undefined
       let root: { width?: number; height?: number } | undefined
       // The terminal's size, kept current while the dialog is open, so a
@@ -373,20 +376,36 @@ export default Plugin.define({
               { title: "Page up", bind: "pageup", run: () => scroll?.scrollBy?.(-pageRows()) },
             ],
           }))
-          const column = (title: string, view: TurnView, tag: string) => (
+          const column = (title: string, sections: Section[]) => (
             <box flexDirection="column" width={DETAIL_COL}>
               <text selectable={false}>
                 <b>{title}</b>
               </text>
-              <text selectable={false}> </text>
-              {[...view.rows, ...filler(tag)].map(([label, value]) => (
-                <text selectable={false}>
-                  <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
-                  {value}
-                </text>
+              {sections.map((sec) => (
+                <box flexDirection="column" marginTop={1}>
+                  <text selectable={false}>
+                    <b>{sec.title}</b>
+                  </text>
+                  {(sec.rows ?? []).map(([label, value]) => (
+                    <text selectable={false}>
+                      <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
+                      {value}
+                    </text>
+                  ))}
+                  {(sec.lines ?? []).map((l, i) => (
+                    <text selectable={false} fg={i === 0 && sec.title.startsWith("Steps") ? subdued : undefined}>
+                      {l || " "}
+                    </text>
+                  ))}
+                </box>
               ))}
             </box>
           )
+          const detail = sessionID ? turnDetail.bySession[sessionID] : undefined
+          const turnTitle = `Last turn · ${detail?.engine ?? turnView.engine}${detail?.outcome ? ` · ${detail.outcome}` : ""}`
+          const turnCol = (): Section[] =>
+            detail ? turnSections(detail) : [{ title: "No turn yet in this run", lines: ["Details start with the next turn."] }]
+          const sessCol = (): Section[] => [{ title: "Summary", rows: sessView.rows, lines: sessView.notes }]
           setTimeout(() => {
             dbg(
               `details: wide ${wide()}; dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; ` +
@@ -405,7 +424,7 @@ export default Plugin.define({
               <text selectable={false}>
                 <b>Heads Up</b>
                 <span style={{ fg: subdued }}>
-                  {wide() ? "  ·  details stub" : `  ·  ${details.tab === "turn" ? "[turn] session" : "turn [session]"}  tab switches`}
+                  {wide() ? "" : `  ·  ${details.tab === "turn" ? "[turn] session" : "turn [session]"}  tab switches`}
                 </span>
               </text>
               <text selectable={false}> </text>
@@ -419,13 +438,13 @@ export default Plugin.define({
               >
                 {wide() ? (
                   <box flexDirection="row" gap={4}>
-                    {column(`Last turn · ${turnView.engine}`, turnView, "turn")}
-                    {column(sessView.engine, sessView, "session")}
+                    {column(turnTitle, turnCol())}
+                    {column(sessView.engine, sessCol())}
                   </box>
                 ) : details.tab === "turn" ? (
-                  column(`Last turn · ${turnView.engine}`, turnView, "turn")
+                  column(turnTitle, turnCol())
                 ) : (
-                  column(sessView.engine, sessView, "session")
+                  column(sessView.engine, sessCol())
                 )}
               </scrollbox>
               <text selectable={false}> </text>
@@ -1078,6 +1097,39 @@ export default Plugin.define({
         }
         else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
         else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
+      }
+
+      // The turn in full, for the dialog. Built before the stream marks are
+      // released below, and from the rows before sub-agent rows join them:
+      // those are OpenCode's, kept in the detail's own sub-agent section.
+      try {
+        const detail = buildTurnDetail(steps, turns, {
+          sessionID,
+          provider,
+          model,
+          engine: engineLabel(provider),
+          at: Date.now(),
+          totalS: turnRate(0, info, turn).total,
+          outcome: opts.outcome,
+          contextLimit: contextLimitFor(provider, model),
+          engineRows: enriched ? [...line.rows] : [],
+          engineNote: enriched ? undefined : [...line.notes],
+          subagents,
+        })
+        dbg(
+          `detail: ${detail.steps.length} step(s); tools [${detail.steps.flatMap((st) => st.tools.map((t) => `${t.name}:${t.seconds?.toFixed(2) ?? t.status}`)).join(", ")}]` +
+            (detail.time ? `; split ${Object.entries(detail.time).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")} of ${detail.totalS?.toFixed(2)}` : "")
+        )
+        setTurnDetail((d) => {
+          d.bySession[sessionID] = detail
+          const keys = Object.keys(d.bySession)
+          if (keys.length > 32) {
+            const oldest = keys.sort((a, b) => (d.bySession[a]?.at ?? 0) - (d.bySession[b]?.at ?? 0))[0]
+            if (oldest) delete d.bySession[oldest]
+          }
+        })
+      } catch (e: unknown) {
+        dbg(`detail threw: ${String(e)}`)
       }
 
       if (subagents) line.rows.push(...subagentRows(subagents))
