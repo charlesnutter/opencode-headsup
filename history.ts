@@ -76,6 +76,8 @@ export interface TurnRecord {
    * parallel, so not a sum). Rates are never combined across them.
    */
   subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
+  /** Set when the reply did not finish: stopped by the user, or failed. */
+  outcome?: "interrupted" | "failed"
   engine?: {
     prefillTokS?: number
     /** Tokens committed per verify pass (MTPLX's multi-token prediction). */
@@ -122,6 +124,11 @@ export interface Summary {
 
 /** A turn's streaming time: recorded, or derived from an older row's rate. */
 export function streamOf(t: TurnRecord): number | undefined {
+  // A reply that did not finish has no tokens recorded for its last step, so
+  // its tokens over its streaming time would understate the speed (measured:
+  // an interrupted turn, 0 tokens over 6s of streaming, halved a session's
+  // average). It counts toward nothing that divides by streaming time.
+  if (t.outcome) return undefined
   if (t.streamS !== undefined && t.streamS > 0) return t.streamS
   // Rows recorded before streamS existed carry a generation rate whose
   // window is tokens / rate. A whole-turn rate is not generation, so no.
@@ -180,6 +187,7 @@ export function formatRow(t: TurnRecord, modelWidth = 18): string {
     t.ttft !== undefined ? `ttft ${nn(t.ttft, 2)}s` : "",
     money(t.cost),
     t.cached !== undefined && t.cached > 0 ? `${ni(t.cached)} cached` : "",
+    t.outcome ?? "",
   ].filter(Boolean)
   // A leading marker rather than a column, so a row is readable at any width.
   const mark = t.source === "engine" ? "*" : " "

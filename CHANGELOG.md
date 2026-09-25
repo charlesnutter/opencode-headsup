@@ -1,3 +1,13 @@
+## [Unreleased]
+### Fixed
+- A reply is recorded when it ends, not when OpenCode's execution does. A
+  message sent while a reply is running is queued into the same execution,
+  so the first reply was never shown: a 19m 53s reply left the previous
+  turn in the sidebar.
+- A reply that was interrupted or failed is shown, marked `interrupted` or
+  `failed`, with OpenCode's figures up to that point, instead of leaving the
+  previous turn in place. The history panel marks it too.
+
 ## [0.3.1] – 2026-09-24
 ### Changed
 - The first turn after OpenCode starts can show engine figures on
