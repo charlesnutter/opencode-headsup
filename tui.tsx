@@ -29,7 +29,7 @@ import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
 import type { HttpOptions } from "./http"
-import { universalView, turnRate, turnSteps, lastModel, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
+import { universalView, turnRate, turnSteps, turnUserAt, lastModel, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
 import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
@@ -311,7 +311,9 @@ export default Plugin.define({
     const turns = new Map<string, Turn>()
     // When each session's current execution started: the start of what the
     // user waits for, which the turn's total runs from (retries included).
-    const execStart = new Map<string, number>()
+    // When each session's current reply started: the execution starting,
+    // then each reply ending, since one execution can hold several replies.
+    const replyStart = new Map<string, number>()
     // Per step: its provider and model (from session.step.started), and for
     // engines that report their latest request -- MTPLX, KoboldCpp, mlx-serve
     // -- a read taken at that step's end. A tool-using turn is one request
@@ -772,8 +774,19 @@ export default Plugin.define({
     // a turn in one tab suppress another tab's line (see panels.ts).
     const latest = new LatestPerKey()
 
-    async function report(sessionID: string): Promise<void> {
-      const seq = latest.begin(sessionID)
+    // Replies already reported, by their last step's id. A reply is reported
+    // when its last step ends, and again asked for when the execution ends;
+    // it must render once.
+    const reported = new Set<string>()
+    /**
+     * One reply: the user message's steps, ending at `endID` (the step that
+     * ended the reply) or at the latest step. `outcome` is set when the
+     * execution was interrupted or failed before the reply finished.
+     */
+    async function report(
+      sessionID: string,
+      opts: { endID?: string; outcome?: "interrupted" | "failed" } = {}
+    ): Promise<void> {
       // `message.list()` is a union of message kinds and its tail after a turn
       // is an "idle" marker, not the reply — measured, see audit P1. Scan
       // backwards for the assistant message.
@@ -782,12 +795,30 @@ export default Plugin.define({
       // The turn is every assistant message since the last user message: one
       // per step when it calls tools. Reading only the last one showed
       // `140 tok  10.20s` for a 316-token, 37s turn (measured, vllm-mlx).
-      const steps = turnSteps(msgs)
-      const agg = aggregateTurn(steps, turns, { execStart: execStart.get(sessionID) })
-      execStart.delete(sessionID)
+      const steps = turnSteps(msgs, opts.endID)
+      const lastID = steps[steps.length - 1]?.id
+      if (!lastID || reported.has(lastID)) return
+      reported.add(lastID)
+      if (reported.size > 64) {
+        const oldest = reported.values().next().value
+        if (oldest !== undefined) reported.delete(oldest)
+      }
+      const seq = latest.begin(sessionID)
+      // The reply started when the execution did -- or, for a message queued
+      // behind an earlier reply in the same execution, when that reply ended,
+      // or when the message was sent if that is later.
+      const userAt = turnUserAt(msgs, opts.endID)
+      const since = replyStart.get(sessionID)
+      const start = since !== undefined && userAt !== undefined ? Math.max(since, userAt) : (since ?? userAt)
+      const agg = aggregateTurn(steps, turns, {
+        execStart: start,
+        endAt: opts.outcome ? Date.now() : undefined,
+      })
+      replyStart.set(sessionID, Date.now())
       const info = agg.info
       const turn = agg.turn
       if (!info) return
+      dbg(`report: ${sessionID} ending ${lastID}${opts.outcome ? ` (${opts.outcome})` : ""}; ${steps.length} step(s)`)
       dbg(
         `turn: ${steps.length} assistant message(s) [${steps
           .map((m) => `${(m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)}${m.finish ? `/${m.finish}` : ""}`)
@@ -860,7 +891,9 @@ export default Plugin.define({
       }
       let line: TurnView | null = null
       try {
-        line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
+        // An unfinished reply's last step never completed, so the engine has
+        // no reading of it to check against: OpenCode's figures only.
+        if (!opts.outcome) line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -884,7 +917,8 @@ export default Plugin.define({
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
         // magnitude when it does. Split to fit the box's 32 cells.
-        if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
+        if (opts.outcome) line.notes.push(opts.outcome)
+        else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
         else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
       }
 
@@ -919,6 +953,7 @@ export default Plugin.define({
         steps: turn?.steps,
         engine: enriched ? tier2.engine : undefined,
         subagents,
+        outcome: opts.outcome,
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns
@@ -992,7 +1027,7 @@ export default Plugin.define({
         ctx.data.on("session.execution.started", (evt) => {
           const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
           if (typeof sid !== "string") return
-          execStart.set(sid, Date.now())
+          replyStart.set(sid, Date.now())
           // The engine this turn will use: the session's last model, or one
           // just selected. A new session on the default model has neither,
           // and its first turn goes unprimed, as before.
@@ -1128,6 +1163,49 @@ export default Plugin.define({
           const sid = (evt as { data?: { sessionID?: string } } | undefined)?.data?.sessionID
           if (typeof sid === "string") {
             report(sid).catch((e: unknown) => dbg(`report threw: ${String(e)}`))
+          }
+        })
+      )
+      // A reply ends when a step ends with a final answer. That is
+      // its own turn even if the execution goes on: a message sent while it
+      // ran is queued into the same execution, which then only ends -- or is
+      // interrupted -- after the next reply (measured: a 19m 53s reply never
+      // reported, because its execution ended interrupted 20m in).
+      off.push(
+        ctx.data.on("session.step.ended", (evt) => {
+          const d = (evt as { data?: { sessionID?: string; assistantMessageID?: string; finish?: string } }).data
+          if (typeof d?.sessionID !== "string" || typeof d.assistantMessageID !== "string") return
+          // Not "error" or "unknown": OpenCode retries a step under the same
+          // message id, and a failed attempt must not end the reply before
+          // the retry does. The execution's own end catches those.
+          if (d.finish !== "stop" && d.finish !== "length" && d.finish !== "content-filter") return
+          const sid = d.sessionID
+          const id = d.assistantMessageID
+          // After the host has applied the step to the message it ends.
+          setTimeout(() => {
+            const m = ctx.data.session.message.get(sid, id) as SessionMessageAssistant | undefined
+            dbg(`reply ended ${id} (${d.finish}); completed ${m?.time?.completed !== undefined}, tokens ${m?.tokens?.output ?? "?"}`)
+            report(sid, { endID: id }).catch((e: unknown) => dbg(`report threw: ${String(e)}`))
+          }, 50)
+        })
+      )
+      // An execution stopped before its reply finished still used the engine;
+      // the reply is shown, marked, rather than leaving the previous turn up.
+      off.push(
+        ctx.data.on("session.execution.interrupted", (evt) => {
+          const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
+          if (typeof sid === "string") {
+            dbg(`event execution.interrupted ${sid}`)
+            report(sid, { outcome: "interrupted" }).catch((e: unknown) => dbg(`report threw: ${String(e)}`))
+          }
+        })
+      )
+      off.push(
+        ctx.data.on("session.execution.failed", (evt) => {
+          const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
+          if (typeof sid === "string") {
+            dbg(`event execution.failed ${sid}`)
+            report(sid, { outcome: "failed" }).catch((e: unknown) => dbg(`report threw: ${String(e)}`))
           }
         })
       )

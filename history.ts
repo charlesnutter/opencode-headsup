@@ -76,6 +76,8 @@ export interface TurnRecord {
    * parallel, so not a sum). Rates are never combined across them.
    */
   subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
+  /** Set when the reply did not finish: stopped by the user, or failed. */
+  outcome?: "interrupted" | "failed"
   engine?: {
     prefillTokS?: number
     /** Tokens committed per verify pass (MTPLX's multi-token prediction). */
@@ -180,6 +182,7 @@ export function formatRow(t: TurnRecord, modelWidth = 18): string {
     t.ttft !== undefined ? `ttft ${nn(t.ttft, 2)}s` : "",
     money(t.cost),
     t.cached !== undefined && t.cached > 0 ? `${ni(t.cached)} cached` : "",
+    t.outcome ?? "",
   ].filter(Boolean)
   // A leading marker rather than a column, so a row is readable at any width.
   const mark = t.source === "engine" ? "*" : " "

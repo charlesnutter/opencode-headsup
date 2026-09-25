@@ -8,7 +8,7 @@
 // counts never disagreed — only the rate's numerator did.
 // Run with: bun test/universal.test.mjs
 import { strict as assert } from "node:assert"
-import { turnRate, universalLine, universalView, turnSteps, lastModel, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
+import { turnRate, universalLine, universalView, turnSteps, turnUserAt, lastModel, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -377,6 +377,39 @@ test("the last model is the newest assistant's or model switch's", () => {
 test("a session with no model named yet gives none, not a guess", () => {
   assert.equal(lastModel([{ type: "user" }]), undefined)
   assert.equal(lastModel([]), undefined)
+})
+
+// ---- a reply's boundaries, when one execution holds several -----------------
+// A message sent while a reply runs is queued into the same execution
+// (measured: a 9-step reply ended `stop`, and the queued message's step began
+// 2s later, in one execution that ended interrupted). Each reply is a turn.
+const queued = [
+  { type: "user", id: "u1", time: { created: 1_000 } },
+  { type: "assistant", id: "a1", time: { created: 2_000 } },
+  { type: "assistant", id: "a2", time: { created: 3_000 } },
+  { type: "user", id: "u2", time: { created: 2_500 } },
+  { type: "assistant", id: "b1", time: { created: 9_000 } },
+]
+
+test("a reply ending at a given step excludes the queued message after it", () => {
+  assert.deepEqual(turnSteps(queued, "a2").map((m) => m.id), ["a1", "a2"])
+  assert.equal(turnUserAt(queued, "a2"), 1_000)
+})
+
+test("without an end step, the turn is the latest reply", () => {
+  assert.deepEqual(turnSteps(queued).map((m) => m.id), ["b1"])
+  assert.equal(turnUserAt(queued), 2_500)
+})
+
+test("an unknown end step falls back to the latest reply", () => {
+  assert.deepEqual(turnSteps(queued, "gone").map((m) => m.id), ["b1"])
+})
+
+test("an interrupted reply's total runs to when it stopped", () => {
+  const partial = [{ type: "assistant", id: "x", time: { created: 5_000 }, tokens: { output: 10, reasoning: 0 } }]
+  const { info } = aggregateTurn(partial, new Map(), { execStart: 4_000, endAt: 34_000 })
+  assert.equal(info.time.completed, 34_000)
+  assert.equal(info.time.created, 4_000)
 })
 
 console.log(`\n${passed} passed`)

@@ -112,16 +112,42 @@ export function turnRate(
  * Reading only the last one showed `140 tok  10.20s` for a 316-token, 37s turn.
  */
 export function turnSteps(
-  msgs: readonly ({ type?: string } | undefined)[]
+  msgs: readonly ({ type?: string; id?: string } | undefined)[],
+  /**
+   * The reply's last step. Given, the turn ends there rather than at the end
+   * of the list: a message sent while a reply is running is queued into the
+   * same execution, so by the time the first reply ends the list can already
+   * hold the next user message after it (measured: a 9-step reply ending in
+   * `stop`, then a queued message's step 2s later, in one execution).
+   */
+  endID?: string
 ): SessionMessageAssistant[] {
   const steps: SessionMessageAssistant[] = []
-  for (let i = msgs.length - 1; i >= 0; i--) {
+  for (let i = lastIndex(msgs, endID); i >= 0; i--) {
     const m = msgs[i]
     if (!m) continue
     if (m.type === "user") break
     if (m.type === "assistant") steps.unshift(m as SessionMessageAssistant)
   }
   return steps
+}
+
+/** When the user message that opened the turn ending at `endID` was sent. */
+export function turnUserAt(
+  msgs: readonly ({ type?: string; id?: string; time?: { created?: number } } | undefined)[],
+  endID?: string
+): number | undefined {
+  for (let i = lastIndex(msgs, endID); i >= 0; i--) {
+    const m = msgs[i]
+    if (m?.type === "user") return m.time?.created
+  }
+  return undefined
+}
+
+function lastIndex(msgs: readonly ({ id?: string } | undefined)[], endID?: string): number {
+  if (endID === undefined) return msgs.length - 1
+  const i = msgs.findIndex((m) => m?.id === endID)
+  return i >= 0 ? i : msgs.length - 1
 }
 
 /**
@@ -160,7 +186,12 @@ export function lastModel(
 export function aggregateTurn(
   steps: readonly SessionMessageAssistant[],
   marks: ReadonlyMap<string, Turn>,
-  opts: { execStart?: number } = {}
+  /**
+   * `execStart`: when the reply started (the execution, or the previous reply
+   * in it ending). `endAt`: when an interrupted reply stopped, since its last
+   * step never completed.
+   */
+  opts: { execStart?: number; endAt?: number } = {}
 ): { info: SessionMessageAssistant | undefined; turn: Turn | undefined } {
   const first = steps[0]
   const last = steps[steps.length - 1]
@@ -198,7 +229,7 @@ export function aggregateTurn(
 
   const info: SessionMessageAssistant = {
     ...last,
-    time: { created: opts.execStart ?? first.time.created, completed: last.time?.completed },
+    time: { created: opts.execStart ?? first.time.created, completed: last.time?.completed ?? opts.endAt },
     tokens: {
       input: last.tokens?.input ?? 0,
       output,
