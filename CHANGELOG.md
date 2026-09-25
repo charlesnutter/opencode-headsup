@@ -4,7 +4,9 @@
   arguments. Those tokens were counted but their streaming time was not, so
   a step that wrote a file showed several times its real speed (3,672 tokens
   "at 162.9 tok/s" against the engine's 36.4), and the Session average was
-  inflated with it. Affects OpenCode's figures, not an engine's own.
+  inflated with it. Affects OpenCode's figures, not an engine's own. On
+  MTPLX, a turn that wrote a file now gives 36.4 tok/s from OpenCode's
+  figures against the engine's 36.1.
 
 ## [0.3.2] – 2026-09-25
 ### Fixed

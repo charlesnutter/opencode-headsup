@@ -1119,10 +1119,12 @@ export default Plugin.define({
       // step's output. Unwatched, a step that wrote a file had its tokens
       // divided by only its text's streaming time (measured: 3,672 tokens "at
       // 162.9 tok/s" on a `write` step, against the engine's 36.4 for the
-      // turn), inflating the session's speed. Watching the argument deltas
-      // alone still left the session at 37.7 against the engine's 32.4, so
-      // the start and end of the arguments are marks too; whether the deltas
-      // reach a plugin at all is logged below.
+      // turn), inflating the session's speed. The argument deltas never
+      // reach a plugin (measured: 0 on every step of an 8-step turn that
+      // wrote a file); the start and end of the arguments do, and with them
+      // the window's last mark lands 0-1ms before the stream ends. Session
+      // 36.4 tok/s against the engine's 36.1, from 55.1 against 36.4. The
+      // delta subscription is kept in case a later OpenCode forwards them.
       const toolDeltas = new Map<string, number>()
       off.push(
         ctx.data.on("session.tool.input.delta", (evt) => {
