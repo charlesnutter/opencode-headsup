@@ -1367,7 +1367,7 @@ export default Plugin.define({
                 {drawBox(turnView, suffix, !ui.collapsed, toggleCollapsed, true)}
                 {summary ? drawBox(sessionView(summary), "", ui.sessionOpen === true, toggleSession, false) : null}
                 <text selectable={false} marginTop={1} marginLeft={3} onMouseDown={() => openDetails(input.sessionID)}>
-                  <span style={{ fg: themeColor("text.action", "text.action.base", "primary") as Color | undefined }}>details ›</span>
+                  <span style={{ fg: themeColor("text.action.base", "text.action", "primary") as Color | undefined }}>details ›</span>
                 </text>
               </box>
             )
