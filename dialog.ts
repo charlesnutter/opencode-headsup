@@ -271,12 +271,13 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
   if (d.cost !== undefined) out.push(row("cost", `$${d.cost.toFixed(4)}`))
   out.push([])
 
-  // Engine: its own figures only, or which were left out and why.
+  // Engine: its own figures only, packed a few to a line, or which were
+  // left out and why.
   if (d.engineRows.length > 0) {
     const title = `${ENGINE_MARK} ${d.engine}`
     const note = " measured by the engine"
     out.push([[title, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - title.length - 1 - note.length)), "rule"], [note, "dim"]])
-    for (const [l, v] of d.engineRows) out.push(row(l, v))
+    out.push(...packRows(d.engineRows, w))
     if (d.compactionEngine) for (const c of d.compactionEngine) out.push(row("compaction", c, "  taken out"))
   } else {
     out.push(heading(d.engine, w))
@@ -289,6 +290,41 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
     out.push(row("count", n0(d.subagents.count), `  ${n0(d.subagents.tokens)} tok · ${dur(d.subagents.spanS)}`))
     if (d.subagents.cost !== undefined) out.push(row("cost", `$${d.subagents.cost.toFixed(4)}`))
   }
+  return out
+}
+
+/**
+ * Label/value rows packed several to a line: `speed 41.2 tok/s   prefill 475
+ * tok/s   ttft 17.37s`. A row with an empty label continues the one above;
+ * acceptance by depth (`93% at depth 1`, ...) folds into `93/87/82% by depth`.
+ */
+export function packRows(rows: ReadonlyArray<readonly [string, string]>, w: number): Line[] {
+  const groups: Array<{ label: string; values: string[] }> = []
+  for (const [label, value] of rows) {
+    if (label || groups.length === 0) groups.push({ label, values: [value] })
+    else (groups[groups.length - 1] as { values: string[] }).values.push(value)
+  }
+  const segs = groups.map(({ label, values }): Line => {
+    const depths = values.map((v) => /^(\d+)% at depth \d+$/.exec(v)?.[1])
+    if (depths.length > 1 && depths.every((x) => x !== undefined)) {
+      return [[label, "dim"], [" ", ""], [`${depths.join("/")}%`, "bold"], [" by depth", "dim"]]
+    }
+    const [first, ...rest] = values
+    return [[label, "dim"], [" ", ""], [first ?? "", "bold"], ...(rest.length > 0 ? ([[` ${rest.join(" ")}`, "dim"]] as Line) : [])]
+  })
+  const out: Line[] = []
+  let cur: Line = []
+  for (const g of segs) {
+    const [labelSeg, , ...value] = g
+    const lead: Line = cur.length === 0 ? [[(labelSeg as Seg)[0].padEnd(LABEL), "dim"], ...value] : [["   ", ""], ...g]
+    if (cur.length > 0 && width(cur) + width(lead) > w) {
+      out.push(cur)
+      cur = [[(labelSeg as Seg)[0].padEnd(LABEL), "dim"], ...value]
+    } else {
+      cur = [...cur, ...lead]
+    }
+  }
+  if (cur.length > 0) out.push(cur)
   return out
 }
 

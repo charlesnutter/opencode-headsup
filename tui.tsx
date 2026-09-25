@@ -330,28 +330,66 @@ export default Plugin.define({
     )
     // The dialog's colours, from the theme's hue scales (measured on 2.0.12:
     // hue.{gray,blue,cyan,purple,orange,red}.{100..900}), each with a fallback.
+    // Each hue's shade is picked by contrast against the theme's background,
+    // not by a fixed step: a fixed 500 came out dark navy on the dark theme
+    // and the rules' gray matched the dialog's background (both measured).
+    type Rgb = { toInts?: () => [number, number, number, number] }
+    const lum = (c: Rgb): number | undefined => {
+      const i = c.toInts?.()
+      if (!i) return undefined
+      const ch = (v: number): number => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * ch(i[0]) + 0.7152 * ch(i[1]) + 0.0722 * ch(i[2])
+    }
+    const shade = (hue: string, contrast: number): Color | undefined => {
+      const bg = themeColor("background.raised.high", "background.base") as Rgb | undefined
+      const lb = bg ? lum(bg) : undefined
+      let best: { c: unknown; d: number } | undefined
+      for (const step of [100, 200, 300, 400, 500, 600, 700, 800, 900]) {
+        const c = themeColor(`hue.${hue}.${step}`) as Rgb | undefined
+        const l = c ? lum(c) : undefined
+        if (c === undefined || l === undefined || lb === undefined) continue
+        const ratio = (Math.max(l, lb) + 0.05) / (Math.min(l, lb) + 0.05)
+        const d = Math.abs(ratio - contrast)
+        if (!best || d < best.d) best = { c, d }
+      }
+      return best?.c as Color | undefined
+    }
+    const palette = new Map<Style, Color | undefined>()
     const styleColor = (st: Style): Color | undefined => {
+      if (palette.has(st)) return palette.get(st)
+      let c: Color | undefined
       switch (st) {
         case "dim":
+          c = subduedColor()
+          break
         case "wait":
-          return subduedColor()
+          c = shade("gray", 3) ?? subduedColor()
+          break
         case "gen":
         case "accent":
-          return themeColor("hue.blue.500", "text.action.primary") as Color | undefined
+          c = shade("blue", 6) ?? (themeColor("text.action.primary") as Color | undefined)
+          break
         case "tool":
-          return themeColor("hue.cyan.500", "hue.green.500") as Color | undefined
+          c = shade("cyan", 6) ?? shade("green", 6)
+          break
         case "sub":
-          return themeColor("hue.purple.500") as Color | undefined
+          c = shade("purple", 6)
+          break
         case "comp":
-          return themeColor("hue.red.400", "hue.red.500") as Color | undefined
+          c = shade("red", 5)
+          break
         case "engine":
-          return themeColor("hue.orange.400", "hue.yellow.500") as Color | undefined
+          c = shade("orange", 7) ?? shade("yellow", 7)
+          break
         case "rule":
-          // hue.gray.700 was invisible on the dialog's background (measured).
-          return themeColor("border.base", "hue.gray.500") as Color | undefined
-        default:
-          return undefined
+          c = shade("gray", 1.8) ?? (themeColor("border.base") as Color | undefined)
+          break
       }
+      palette.set(st, c)
+      return c
     }
     /** One line of the dialog: a `<text>` with a span per segment. */
     const drawLine = (line: Line) => (
@@ -472,7 +510,10 @@ export default Plugin.define({
           // the layout needs, the dialog goes to `xlarge` and is measured again.
           const fit = (tries: number): void => {
             setTimeout(() => {
-              const inner = root?.width !== undefined ? root.width - 4 : undefined
+              // Less the side padding (4) and the scrollbar with a gap beside
+              // it (2): a full-width line that overflowed wrapped onto a second
+              // line, which read as a blank row under every heading (measured).
+              const inner = root?.width !== undefined ? root.width - 6 : undefined
               if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
                 ctx.ui.dialog.set({ size: "xlarge", centered: true })
                 fit(tries - 1)
@@ -484,6 +525,14 @@ export default Plugin.define({
                 })
               }
               dbg(`details: dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; content ${details.w} wide; ${lines().length} lines`)
+              if (HUD_DEBUG) {
+                const hex = (c: unknown): string => {
+                  const i = (c as { toInts?: () => number[] } | undefined)?.toInts?.()
+                  return i ? `#${i.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")}` : "none"
+                }
+                const picks = (["gen", "wait", "tool", "sub", "engine", "rule"] as Style[]).map((st) => `${st} ${hex(styleColor(st))}`)
+                dbg(`details: colours ${picks.join(", ")}; background ${hex(themeColor("background.raised.high", "background.base"))}`)
+              }
             }, 60)
           }
           fit(1)
