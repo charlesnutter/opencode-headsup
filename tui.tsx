@@ -467,7 +467,7 @@ export default Plugin.define({
           }
           // Sized to the content, up to 70% of the screen less the tabs and
           // footer; it scrolls only beyond that.
-          const bodyRows = (): number => Math.max(4, Math.min(lines().length, Math.floor(details.rows * 0.7) - 4))
+          const bodyRows = (): number => Math.max(4, Math.min(lines().length, Math.floor(details.rows * 0.75) - 6))
           ctx.keymap.layer(() => ({
             mode: "global",
             priority: 100,
@@ -510,10 +510,10 @@ export default Plugin.define({
           // the layout needs, the dialog goes to `xlarge` and is measured again.
           const fit = (tries: number): void => {
             setTimeout(() => {
-              // Less the side padding (4) and the scrollbar with a gap beside
-              // it (2): a full-width line that overflowed wrapped onto a second
-              // line, which read as a blank row under every heading (measured).
-              const inner = root?.width !== undefined ? root.width - 6 : undefined
+              // Less the side padding (2 x 4) and the scrollbar with a gap
+              // beside it (2): a full-width line that overflowed wrapped onto
+              // a second line, which read as a blank row under every heading.
+              const inner = root?.width !== undefined ? root.width - 10 : undefined
               if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
                 ctx.ui.dialog.set({ size: "xlarge", centered: true })
                 fit(tries - 1)
@@ -521,7 +521,7 @@ export default Plugin.define({
               }
               if (inner !== undefined) {
                 setDetails((d) => {
-                  d.w = Math.max(CONTENT_WIDTH, Math.min(110, inner))
+                  d.w = Math.max(CONTENT_WIDTH, Math.min(96, inner))
                 })
               }
               dbg(`details: dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; content ${details.w} wide; ${lines().length} lines`)
@@ -539,8 +539,10 @@ export default Plugin.define({
           return (
             <box
               flexDirection="column"
-              paddingLeft={2}
-              paddingRight={2}
+              paddingLeft={4}
+              paddingRight={4}
+              paddingTop={1}
+              paddingBottom={1}
               ref={(r: unknown) => (root = r as typeof root)}
             >
               {drawLine(tabsLine(details.tab, note(), details.w))}
@@ -566,7 +568,9 @@ export default Plugin.define({
           dbg("details: closed")
         }
       )
-      ctx.ui.dialog.set({ size: "large", centered: true })
+      // xlarge (116 cells on a 214-column terminal, measured) leaves room for
+      // wider margins around a 72-96 cell layout.
+      ctx.ui.dialog.set({ size: "xlarge", centered: true })
     }
     const currentSession = (): string | undefined => {
       const r = ctx.ui.router.current()

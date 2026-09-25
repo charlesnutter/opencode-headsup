@@ -58,6 +58,29 @@ export function heading(title: string, w: number, right = ""): Line {
   return line
 }
 
+/** Width of the value column, right-aligned, where a row's value lines up with others. */
+const VALUE = 9
+/** Where a row's bar (or its note) starts: after the label and value columns, and a gap. */
+const BAR_AT = LABEL + VALUE + 3
+
+/** `label` dim, then `value` bold and right-aligned in the value column. */
+export function valueRow(label: string, value: string): Line {
+  return [[label.padEnd(LABEL), "dim"], [value.padStart(VALUE), "bold"]]
+}
+
+/**
+ * The grid every figure row uses: label, value right-aligned in the value
+ * column, and what follows (a unit, a note, a bar) from a fixed column.
+ */
+export function gridRow(label: string, value: string, tail: Line | string = []): Line {
+  const head = valueRow(label, value)
+  const rest: Line = typeof tail === "string" ? (tail ? [[tail, "dim"]] : []) : tail
+  return rest.length > 0 ? [...head, [" ".repeat(BAR_AT - width(head)), ""], ...rest] : head
+}
+
+/** A heading and the blank row under it: every section opens this way. */
+export const titled = (title: string, w: number, right = ""): Line[] => [heading(title, w, right), []]
+
 /** `label` dim in its column, `value` bold, `tail` dim. */
 export function row(label: string, value: string, tail = ""): Line {
   const line: Line = [[label.padEnd(LABEL), "dim"], [value, "bold"]]
@@ -93,7 +116,11 @@ export function bar(parts: ReadonlyArray<readonly [value: number, style: Style, 
   return parts.flatMap(([, style, glyph], i) => ((n[i] as number) > 0 ? [[glyph.repeat(n[i] as number), style] as const] : []))
 }
 
-const GLYPH = { waiting: "░", generating: "█", tools: "▒", subagents: "▓", compaction: "╳", other: "·" } as const
+// Bars are drawn with a line glyph, not full blocks: a full block fills its
+// whole row and touched the text above and below (measured: the dialog read
+// as cramped). Parts are told apart by colour; the legend marks each with ■.
+const BAR = "━"
+const GLYPH = { waiting: BAR, generating: BAR, tools: BAR, subagents: BAR, compaction: BAR, other: BAR } as const
 const STYLE: Record<keyof typeof GLYPH, Style> = {
   waiting: "wait",
   generating: "gen",
@@ -121,20 +148,22 @@ function timeSplit(
     (k) => t[k] > 0 || k === "waiting" || k === "generating"
   )
   const pct = percents(keys.map((k) => t[k]))
-  const out: Line[] = [heading("Where the time went", w, dur(total))]
-  out.push([["  ", ""], ...bar(keys.map((k) => [t[k], STYLE[k], GLYPH[k]] as const), w - 4)])
+  const out: Line[] = [...titled("Where the time went", w, dur(total))]
+  // The bar and legend start at the label column, and each legend value ends
+  // where every other row's value does.
+  out.push(bar(keys.map((k) => [t[k], STYLE[k], GLYPH[k]] as const), w))
   const cell = (k: keyof typeof GLYPH, i: number): Line => [
-    [GLYPH[k], STYLE[k]],
-    [` ${NAME[k].padEnd(11)}`, "dim"],
-    [dur(t[k]).padStart(8), "bold"],
+    ["■", STYLE[k]],
+    [` ${NAME[k].padEnd(LABEL - 2)}`, "dim"],
+    [dur(t[k]).padStart(VALUE), "bold"],
     [(pct[i] === 0 && t[k] > 0 ? "<1%" : `${pct[i]}%`).padStart(5), "dim"],
   ]
   const half = Math.ceil(keys.length / 2)
   for (let r = 0; r < half; r++) {
     const left = keys[r] as keyof typeof GLYPH
     const right = keys[r + half]
-    const line: Line = [["  ", ""], ...cell(left, r)]
-    if (right) line.push(["      ", ""], ...cell(right, r + half))
+    const line: Line = [...cell(left, r)]
+    if (right) line.push([" ".repeat(Math.max(2, Math.floor(w / 2) - width(line))), ""], ...cell(right, r + half))
     out.push(line)
   }
   return out
@@ -183,7 +212,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
   if (start !== undefined && end !== undefined && end > start && d.steps.length > 0) {
     const cells = w - 8
     const at = (ms: number): number => Math.max(0, Math.min(cells, Math.round(((ms - start) / (end - start)) * cells)))
-    out.push(heading("Timeline", w, "per step"))
+    out.push(...titled("Timeline", w, "per step"))
     d.steps.forEach((s, i) => {
       const spans: Array<[number, number, Style, string]> = []
       if (s.firstAt !== undefined) spans.push([s.createdAt, s.firstAt, "wait", GLYPH.waiting])
@@ -215,7 +244,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
   // Steps: OpenCode's rate, and the engine's own where it read each step.
   if (d.steps.length > 0) {
     const eng = d.stepEngine?.some((e) => e?.decodeTokS !== undefined) === true
-    out.push(heading("Steps", w, String(d.steps.length)))
+    out.push(...titled("Steps", w, String(d.steps.length)))
     out.push([
       ["   #  tokens  ", "dim"],
       ...(eng ? ([[ENGINE_MARK, "engine"], ["tok/s ", "dim"]] as Line) : []),
@@ -255,40 +284,35 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
 
   // Tokens: the five kinds, with the cache's share and the context used as bars.
   const t = d.tokens
-  out.push(heading("Tokens", w))
+  out.push(...titled("Tokens", w))
   // Generated first, as the steps and the engine count it; then its split.
   const produced = t.output + t.reasoning
   out.push(
-    row(
-      "generated",
-      n0(produced),
-      t.reasoning > 0 ? `  ${n0(t.output)} answer · ${n0(t.reasoning)} reasoning (${share(t.reasoning, produced)})` : ""
-    )
+    gridRow("generated", n0(produced), t.reasoning > 0 ? `${n0(t.output)} answer · ${n0(t.reasoning)} reasoning (${share(t.reasoning, produced)})` : "")
   )
   const prompt = t.input + t.cacheRead
-  const BAR_AT = 24
   if (prompt > 0) {
-    const head = row("prompt", n0(prompt))
+    const head = valueRow("prompt", n0(prompt))
     out.push([
       ...head,
       [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-      ...bar([[t.input, "gen", "█"], [t.cacheRead, "wait", "░"]], 20),
+      ...bar([[t.input, "gen", BAR], [t.cacheRead, "wait", BAR]], 20),
       [`  ${n0(t.input)} fresh · ${n0(t.cacheRead)} cached (${share(t.cacheRead, prompt)})`, "dim"],
     ])
   }
-  if (t.cacheWrite > 0) out.push(row("", n0(t.cacheWrite), " written to cache"))
+  if (t.cacheWrite > 0) out.push(gridRow("", n0(t.cacheWrite), "written to cache"))
   if (d.context) {
-    const head = row("context", n0(d.context.used))
+    const head = valueRow("context", n0(d.context.used))
     const tail: Line = d.context.limit
       ? [
           [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-          ...bar([[d.context.used, "gen", "█"], [Math.max(0, d.context.limit - d.context.used), "wait", "░"]], 20),
+          ...bar([[d.context.used, "gen", BAR], [Math.max(0, d.context.limit - d.context.used), "wait", BAR]], 20),
           [`  ${share(d.context.used, d.context.limit)} of ${n0(d.context.limit)}`, "dim"],
         ]
       : []
     out.push([...head, ...tail])
   }
-  if (d.cost !== undefined) out.push(row("cost", `$${d.cost.toFixed(4)}`))
+  if (d.cost !== undefined) out.push(gridRow("cost", `$${d.cost.toFixed(4)}`))
   out.push([])
 
   // Engine: its own figures only, packed a few to a line, or which were
@@ -296,19 +320,57 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
   if (d.engineRows.length > 0) {
     const title = `${ENGINE_MARK} ${d.engine}`
     const note = " measured by the engine"
-    out.push([[title, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - title.length - 1 - note.length)), "rule"], [note, "dim"]])
-    out.push(...packRows(d.engineRows, w))
-    if (d.compactionEngine) for (const c of d.compactionEngine) out.push(row("compaction", c, "  taken out"))
+    out.push([[title, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - title.length - 1 - note.length)), "rule"], [note, "dim"]], [])
+    out.push(...gridRows(d.engineRows, w))
+    if (d.compactionEngine) for (const c of d.compactionEngine) out.push(gridRow("compaction", "", `${c}, taken out of the above`))
   } else {
-    out.push(heading(d.engine, w))
+    out.push(...titled(d.engine, w))
     const note = d.engineNote && d.engineNote.length > 0 ? `${d.engine}'s figures were left out: ${d.engineNote.join(" ")}` : "no engine telemetry for this provider"
     for (const l of wrap(note, w)) out.push([[l, "dim"]])
   }
 
   if (d.subagents) {
-    out.push([], heading("Sub-agents", w))
-    out.push(row("count", n0(d.subagents.count), `  ${n0(d.subagents.tokens)} tok · ${dur(d.subagents.spanS)}`))
-    if (d.subagents.cost !== undefined) out.push(row("cost", `$${d.subagents.cost.toFixed(4)}`))
+    out.push([], ...titled("Sub-agents", w))
+    out.push(gridRow("count", n0(d.subagents.count), `${n0(d.subagents.tokens)} tok · ${dur(d.subagents.spanS)}`))
+    if (d.subagents.cost !== undefined) out.push(gridRow("cost", `$${d.subagents.cost.toFixed(4)}`))
+  }
+  return out
+}
+
+/**
+ * Label/value rows in a two-column grid: each pair's label in a fixed column,
+ * its value beside it, the second column starting at half the width. A row
+ * with an empty label continues the one above; acceptance by depth folds
+ * into `93/87/82% by depth`.
+ */
+export function gridRows(rows: ReadonlyArray<readonly [string, string]>, w: number): Line[] {
+  const groups: Array<{ label: string; value: string; rest: string }> = []
+  let cur: { label: string; values: string[] } | undefined
+  const flush = (): void => {
+    if (!cur) return
+    const depths = cur.values.map((v) => /^(\d+)% at depth \d+$/.exec(v)?.[1])
+    if (depths.length > 1 && depths.every((x) => x !== undefined)) groups.push({ label: cur.label, value: `${depths.join("/")}%`, rest: "by depth" })
+    else groups.push({ label: cur.label, value: cur.values[0] ?? "", rest: cur.values.slice(1).join(" ") })
+  }
+  for (const [label, value] of rows) {
+    if (label || !cur) {
+      flush()
+      cur = { label, values: [value] }
+    } else cur.values.push(value)
+  }
+  flush()
+  const half = Math.floor(w / 2)
+  const cell = (g: { label: string; value: string; rest: string }, cw: number): Line => {
+    const line: Line = [[g.label.padEnd(LABEL), "dim"], [g.value, "bold"]]
+    if (g.rest) line.push([` ${g.rest}`, "dim"])
+    const used = width(line)
+    return used < cw ? [...line, [" ".repeat(cw - used), ""]] : line
+  }
+  const out: Line[] = []
+  for (let i = 0; i < groups.length; i += 2) {
+    const a = groups[i] as { label: string; value: string; rest: string }
+    const b = groups[i + 1]
+    out.push(b ? [...cell(a, half), ...cell(b, 0)] : cell(a, 0))
   }
   return out
 }
@@ -356,19 +418,19 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
   const out: Line[] = []
   const s = f.summary
 
-  out.push(heading("Speed", w, "generation only"))
+  out.push(...titled("Speed", w, "generation only"))
   if (s.genTokS !== undefined) {
     const spread =
       f.rates.length > 1
-        ? `   min ${n1(quantile(f.rates, 0) as number)} · median ${n1(quantile(f.rates, 0.5) as number)} · p90 ${n1(quantile(f.rates, 0.9) as number)} · max ${n1(quantile(f.rates, 1) as number)}`
+        ? `  ·  min ${n1(quantile(f.rates, 0) as number)} · median ${n1(quantile(f.rates, 0.5) as number)} · p90 ${n1(quantile(f.rates, 0.9) as number)} · max ${n1(quantile(f.rates, 1) as number)}`
         : ""
-    out.push(row("average", `${n1(s.genTokS)} tok/s`, spread))
+    out.push(gridRow("average", n1(s.genTokS), `tok/s${spread}`))
   }
   const spark = sparkline(f.rates.slice(0, 24).reverse())
-  if (spark) out.push([...row("trend", ""), [spark, "accent"], [`   last ${Math.min(24, f.rates.length)} turns`, "dim"]])
+  if (spark) out.push(gridRow("trend", "", [[spark, "accent"], [`   last ${Math.min(24, f.rates.length)} turns`, "dim"]]))
   if (f.ttfts.length > 0) {
-    const more = f.ttfts.length > 1 ? `  median · p90 ${(quantile(f.ttfts, 0.9) as number).toFixed(2)}s · max ${(quantile(f.ttfts, 1) as number).toFixed(2)}s` : ""
-    out.push(row("ttft", `${(quantile(f.ttfts, 0.5) as number).toFixed(2)}s`, more))
+    const more = f.ttfts.length > 1 ? `median · p90 ${(quantile(f.ttfts, 0.9) as number).toFixed(2)}s · max ${(quantile(f.ttfts, 1) as number).toFixed(2)}s` : ""
+    out.push(gridRow("ttft", `${(quantile(f.ttfts, 0.5) as number).toFixed(2)}s`, more.trim()))
   }
   out.push([])
 
@@ -377,11 +439,11 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
   if (f.tools.length > 0) {
     const shown = f.tools.slice(0, 8)
     const most = (shown[0] as { s: number }).s
-    out.push(heading("Tools by time", w, `${n0(f.toolCalls)} calls`))
+    out.push(...titled("Tools by time", w, `${n0(f.toolCalls)} calls`))
     for (const t of shown) {
       out.push([
         [`  ${t.name.slice(0, 10).padEnd(11)}`, "dim"],
-        ...bar([[t.s, "tool", "▒"], [Math.max(0, most - t.s), "", " "]], 28),
+        ...bar([[t.s, "tool", BAR], [Math.max(0, most - t.s), "", " "]], 28),
         [`  ${dur(t.s).padStart(7)}`, "bold"],
         [`  ${n0(t.n)} ${t.n === 1 ? "call" : "calls"}`, "dim"],
       ])
@@ -390,41 +452,48 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     out.push([])
   }
 
-  out.push(heading("Coverage", w, "turns with the engine's own figures"))
-  out.push([
-    ...row("engine", `${n0(f.coverage.engine)} of ${n0(f.coverage.total)}`, " ".repeat(Math.max(1, 12 - `${n0(f.coverage.engine)} of ${n0(f.coverage.total)}`.length))),
-    ...bar([[f.coverage.engine, "gen", "█"], [f.coverage.total - f.coverage.engine, "wait", "░"]], 20),
-  ])
-  f.coverage.without.forEach(({ label, n }, i) => out.push(row(i === 0 ? "without" : "", "", `${n0(n)} ${label}`)))
+  out.push(...titled("Coverage", w, "turns with the engine's own figures"))
+  out.push(
+    gridRow("engine", `${n0(f.coverage.engine)}/${n0(f.coverage.total)}`, [
+      ...bar([[f.coverage.engine, "gen", BAR], [f.coverage.total - f.coverage.engine, "wait", BAR]], 20),
+      [`  ${share(f.coverage.engine, f.coverage.total)} of turns`, "dim"],
+    ])
+  )
+  f.coverage.without.forEach(({ label, n }, i) => out.push(gridRow(i === 0 ? "without" : "", n0(n), label)))
   out.push([])
 
-  out.push(heading("Tokens", w))
+  out.push(...titled("Tokens", w))
   const gen = f.tokens.output + f.tokens.reasoning
   out.push(
-    row("generated", n0(gen), f.tokens.reasoning > 0 ? `  ${n0(f.tokens.output)} answer · ${n0(f.tokens.reasoning)} reasoning (${share(f.tokens.reasoning, gen)})` : "")
+    gridRow("generated", n0(gen), f.tokens.reasoning > 0 ? `${n0(f.tokens.output)} answer · ${n0(f.tokens.reasoning)} reasoning (${share(f.tokens.reasoning, gen)})` : "")
   )
   if (f.tokens.input !== undefined || f.tokens.cacheRead !== undefined) {
     const fresh = f.tokens.input ?? 0
     const cached = f.tokens.cacheRead ?? 0
-    out.push(row("prompt", n0(fresh + cached), `  ${n0(fresh)} fresh · ${n0(cached)} cached (${share(cached, fresh + cached)})`))
+    out.push(
+      gridRow("prompt", n0(fresh + cached), [
+        ...bar([[fresh, "gen", BAR], [cached, "wait", BAR]], 20),
+        [`  ${n0(fresh)} fresh · ${n0(cached)} cached (${share(cached, fresh + cached)})`, "dim"],
+      ])
+    )
   }
-  if (f.tokens.cacheWrite > 0) out.push(row("", n0(f.tokens.cacheWrite), " written to cache"))
-  out.push(row("totals", `${n0(f.turns)} turns`, `  ${n0(f.steps)} steps · ${dur(f.elapsedS)}${f.cost !== undefined ? ` · $${f.cost.toFixed(4)}` : ""}`))
+  if (f.tokens.cacheWrite > 0) out.push(gridRow("", n0(f.tokens.cacheWrite), "written to cache"))
+  out.push(gridRow("turns", n0(f.turns), `${n0(f.steps)} steps · ${dur(f.elapsedS)}${f.cost !== undefined ? ` · $${f.cost.toFixed(4)}` : ""}`))
 
   if (f.retryReasons.length > 0) {
-    out.push([], heading("Retries", w, String(s.retries)))
+    out.push([], ...titled("Retries", w, String(s.retries)))
     for (const { reason, n } of f.retryReasons) for (const l of wrap(`${n}× ${reason}`, w - 2)) out.push([[`  ${l}`, "dim"]])
   }
 
   if (s.engine && (s.engine.mtpX !== undefined || s.engine.draftAccept !== undefined || s.engine.prefillTokS !== undefined)) {
-    out.push([], [[`${ENGINE_MARK} Engine averages`, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - 18)), "rule"]])
-    if (s.engine.mtpX !== undefined) out.push(row("MTP", `${s.engine.mtpX.toFixed(2)}x`))
-    if (s.engine.draftAccept !== undefined) out.push(row("draft", `${Math.round(s.engine.draftAccept * 100)}%`, " accepted"))
-    if (s.engine.prefillTokS !== undefined) out.push(row("prefill", `${n0(s.engine.prefillTokS)} tok/s`))
+    out.push([], [[`${ENGINE_MARK} Engine averages`, "engine"], [" ", ""], ["─".repeat(Math.max(0, w - 18)), "rule"]], [])
+    if (s.engine.mtpX !== undefined) out.push(gridRow("MTP", `${s.engine.mtpX.toFixed(2)}x`, "average"))
+    if (s.engine.draftAccept !== undefined) out.push(gridRow("draft", `${Math.round(s.engine.draftAccept * 100)}%`, "accepted, average"))
+    if (s.engine.prefillTokS !== undefined) out.push(gridRow("prefill", n0(s.engine.prefillTokS), "tok/s average"))
   }
   if (s.subagents) {
-    out.push([], heading("Sub-agents", w))
-    out.push(row("count", n0(s.subagents.count), `  ${n0(s.subagents.tokens)} tok${s.subagents.cost !== undefined ? ` · $${s.subagents.cost.toFixed(4)}` : ""}`))
+    out.push([], ...titled("Sub-agents", w))
+    out.push(gridRow("count", n0(s.subagents.count), `${n0(s.subagents.tokens)} tok${s.subagents.cost !== undefined ? ` · $${s.subagents.cost.toFixed(4)}` : ""}`))
   }
   return out
 }
