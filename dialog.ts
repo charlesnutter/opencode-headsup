@@ -404,7 +404,10 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
 
   if (f.time) out.push(heading("Where the time went", w, dur(f.time.total)), timeBar(f.time, w), ...legendFlow(f.time, w), [])
 
-  if (f.tools.length > 0) {
+  if (f.tools.length === 0) {
+    out.push(heading("Tools by time", w))
+    out.push([[f.toolsRecorded > 0 ? "  no tool calls in these turns" : "  not recorded for these turns (recorded from this version on)", "dim"]], [])
+  } else {
     const shown = f.tools.slice(0, 8)
     const most = (shown[0] as { s: number }).s
     out.push(heading("Tools by time", w, `${n0(f.toolCalls)} calls`))
@@ -566,27 +569,43 @@ function midCut(s: string, n: number): string {
 
 /**
  * A terminal row has one height and a plugin cannot change it, so space
- * between lines comes only in whole blank rows. Two ways to spend them:
+ * between lines comes only in whole blank rows. "roomy" is the layout the
+ * user settled on (2026-09-25, by editing the mockup):
  *
- * - "headings": a blank row under each section heading;
- * - "bars": a blank row under a bar, so its blocks -- which fill their whole
- *   row -- do not touch the legend or keys below. Consecutive bar rows (the
- *   timeline, tools by time) stay together.
+ * - a blank row under every section heading;
+ * - a blank row above and below a bar, whose blocks fill their whole row and
+ *   would otherwise touch the text next to it;
+ * - except inside a chart -- the timeline's steps, tools by time -- whose rows
+ *   belong together and keep their axis beside them.
  */
-export type Spacing = "tight" | "headings" | "bars"
+export type Spacing = "tight" | "roomy"
 
 const isBarLine = (l: Line): boolean => l.some(([t]) => t.length >= 2 && /^[░█▒▓╳]+$/.test(t))
-const isHeading = (l: Line): boolean => l.some(([t, st]) => st === "rule" && t.startsWith("─")) && (l[0]?.[1] === "bold" || l[0]?.[1] === "engine")
+const isHeading = (l: Line): boolean =>
+  l.some(([t, st]) => st === "rule" && t.startsWith("─")) && (l[0]?.[1] === "bold" || l[0]?.[1] === "engine")
+/** A chart row: an indented, dim label (a step number, a tool name), then its bar. */
+const isChartRow = (l: Line): boolean => {
+  const first = l[0]
+  return first !== undefined && first[1] === "dim" && /^ {2}\S/.test(first[0]) && isBarLine(l)
+}
+/** The timeline's axis, which stays under its chart. */
+const isAxis = (l: Line): boolean => l[0]?.[1] === "dim" && /^ {5}0s$/.test(l[0][0])
 
 export function spaced(lines: readonly Line[], spacing: Spacing): Line[] {
   if (spacing === "tight") return [...lines]
   const out: Line[] = []
+  const blank = (): void => {
+    if (out.length > 0 && (out[out.length - 1] as Line).length > 0) out.push([])
+  }
   lines.forEach((l, i) => {
+    const bar = isBarLine(l) && !isChartRow(l)
+    if (bar) blank()
     out.push(l)
     const next = lines[i + 1]
-    const blankNext = next === undefined || next.length === 0
-    if (spacing === "headings" && isHeading(l) && !blankNext) out.push([])
-    if (spacing === "bars" && isBarLine(l) && !blankNext && !isBarLine(next as Line)) out.push([])
+    if (next === undefined || next.length === 0) return
+    if (isHeading(l)) blank()
+    else if (bar) blank()
+    else if (isChartRow(l) && !isChartRow(next) && !isAxis(next)) blank()
   })
   return out
 }

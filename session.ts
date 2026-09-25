@@ -295,6 +295,8 @@ export interface SessionFigures {
   time?: { waiting: number; generating: number; tools: number; subagents: number; compaction: number; other: number; total: number }
   /** Per tool name, most time first. */
   tools: Array<{ name: string; s: number; n: number }>
+  /** Turns whose tool use was recorded at all (rows from before it was lack it). */
+  toolsRecorded: number
   tokens: { output: number; reasoning: number; input?: number; cacheRead?: number; cacheWrite: number }
   retryReasons: Array<{ reason: string; n: number }>
   coverage: { engine: number; total: number; without: Array<{ label: string; n: number }> }
@@ -383,6 +385,7 @@ export function sessionFigures(history: readonly TurnRecord[], sessionID: string
         ? { waiting: wait, generating: gen, tools, subagents: sub, compaction: comp, other: Math.max(0, total - wait - gen - tools - sub - comp), total }
         : undefined,
     tools: [...byTool.entries()].map(([name, x]) => ({ name, ...x })).sort((a, b) => b.s - a.s),
+    toolsRecorded: turns.filter((t) => t.tools !== undefined).length,
     tokens: {
       output: sum((t) => t.tokens) - reasoning,
       reasoning,

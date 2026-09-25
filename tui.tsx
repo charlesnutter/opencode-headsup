@@ -179,11 +179,8 @@ interface UiState {
 
 // ---- entry ------------------------------------------------------------------
 
-/**
- * Blank rows in the details dialog: "tight" as the approved mockup, or a row
- * under each heading, or under each bar (see dialog.ts).
- */
-const DIALOG_SPACING: Spacing = "tight"
+/** Blank rows in the details dialog: "roomy", as the user laid it out (see dialog.ts). */
+const DIALOG_SPACING: Spacing = "roomy"
 
 /** Identifies this plugin's panel among any others contributed to the slot. */
 const PANEL_NAME = "headsup.history"
@@ -1445,7 +1442,8 @@ export default Plugin.define({
         cacheWrite: detail?.tokens.cacheWrite || undefined,
         toolsS: detail?.time?.tools,
         compactionS: detail?.time?.compaction || undefined,
-        tools: detail ? toolsByName(detail) : undefined,
+        // {} when the turn used no tool, so "none" can be told from "not recorded".
+        tools: detail ? (toolsByName(detail) ?? {}) : undefined,
         retryReasons: detail?.steps.flatMap((st) => (st.retryReason ? [st.retryReason] : [])),
         skip: enriched
           ? undefined
