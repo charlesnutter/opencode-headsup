@@ -297,6 +297,120 @@ export default Plugin.define({
       )
     }
 
+    // ---- the details dialog (stub) ------------------------------------------
+    // A full-detail view opened from the sidebar. This is the measuring stub:
+    // real figures come later. It checks what the types promise but 2.0.12
+    // has not shown yet -- that ui.dialog.show draws our JSX at xlarge, how
+    // wide that is, that a scrollbox inside it scrolls by wheel and by keys,
+    // and that a keymap layer inside the dialog can take tab without the
+    // prompt behind it seeing it.
+    const [details, setDetails] = ctx.storage.memory<{ tab: "turn" | "session" }>("details", {
+      initial: { tab: "turn" },
+    })
+    /** Below this many terminal columns the two columns are one, switched by tab. */
+    const TWO_COLUMN_MIN = 110
+    const DETAIL_COL = 46
+    const openDetails = (sessionID: string | undefined): void => {
+      dbg(`details: open for ${sessionID ?? "no session"}; terminal ${ctx.renderer.terminalWidth}x${ctx.renderer.terminalHeight}`)
+      const stored = sessionID ? lineFor(panel, sessionID) : PLACEHOLDER
+      const turnView: TurnView =
+        stored === PLACEHOLDER ? { engine: "last turn", rows: [], notes: ["no turn yet"] } : decodeView(stored)
+      const summary = summariseSession(history.turns, sessionID)
+      const sessView: TurnView = summary ? sessionView(summary) : { engine: "Session", rows: [], notes: ["no turns yet"] }
+      // Filler, so the body is taller than any terminal and has to scroll.
+      const filler = (tag: string): Array<readonly [string, string]> =>
+        Array.from({ length: 40 }, (_, i) => [i === 0 ? "stub" : "", `${tag} row ${i + 1}`] as const)
+      let scroll: { scrollBy?: (d: number) => void; width?: number; height?: number; focus?: () => void } | undefined
+      let root: { width?: number; height?: number } | undefined
+      ctx.ui.dialog.show(
+        () => {
+          const subdued = subduedColor()
+          const wide = ctx.renderer.terminalWidth >= TWO_COLUMN_MIN
+          const pageRows = Math.max(4, ctx.renderer.terminalHeight - 14)
+          ctx.keymap.layer(() => ({
+            mode: "global",
+            priority: 100,
+            commands: [
+              {
+                title: "Switch turn / session",
+                bind: "tab",
+                run: () => {
+                  setDetails((d) => {
+                    d.tab = d.tab === "turn" ? "session" : "turn"
+                  })
+                  dbg(`details: tab -> ${details.tab}`)
+                },
+              },
+              { title: "Scroll down", bind: "down", run: () => scroll?.scrollBy?.(1) },
+              { title: "Scroll up", bind: "up", run: () => scroll?.scrollBy?.(-1) },
+              { title: "Page down", bind: "pagedown", run: () => scroll?.scrollBy?.(pageRows) },
+              { title: "Page up", bind: "pageup", run: () => scroll?.scrollBy?.(-pageRows) },
+            ],
+          }))
+          const column = (title: string, view: TurnView, tag: string) => (
+            <box flexDirection="column" width={DETAIL_COL}>
+              <text selectable={false}>
+                <b>{title}</b>
+              </text>
+              <text selectable={false}> </text>
+              {[...view.rows, ...filler(tag)].map(([label, value]) => (
+                <text selectable={false}>
+                  <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
+                  {value}
+                </text>
+              ))}
+            </box>
+          )
+          setTimeout(() => {
+            dbg(
+              `details: wide ${wide}; dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; ` +
+                `scrollbox ${scroll?.width ?? "?"}x${scroll?.height ?? "?"}`
+            )
+          }, 300)
+          return (
+            <box flexDirection="column" ref={(r: unknown) => (root = r as typeof root)}>
+              <text selectable={false}>
+                <b>Heads Up</b>
+                <span style={{ fg: subdued }}>
+                  {wide ? "  ·  details stub" : `  ·  ${details.tab === "turn" ? "[turn] session" : "turn [session]"}  tab switches`}
+                </span>
+              </text>
+              <text selectable={false}> </text>
+              <scrollbox
+                ref={(r: unknown) => {
+                  scroll = r as typeof scroll
+                  scroll?.focus?.()
+                }}
+                scrollY
+                height={pageRows}
+              >
+                {wide ? (
+                  <box flexDirection="row" gap={4}>
+                    {column(`Last turn · ${turnView.engine}`, turnView, "turn")}
+                    {column(sessView.engine, sessView, "session")}
+                  </box>
+                ) : details.tab === "turn" ? (
+                  column(`Last turn · ${turnView.engine}`, turnView, "turn")
+                ) : (
+                  column(sessView.engine, sessView, "session")
+                )}
+              </scrollbox>
+              <text selectable={false}> </text>
+              <text selectable={false} fg={subdued}>
+                {"wheel or ↑↓ pgup pgdn scroll  ·  esc closes"}
+              </text>
+            </box>
+          )
+        },
+        () => dbg("details: closed")
+      )
+      ctx.ui.dialog.set({ size: "xlarge" })
+    }
+    const currentSession = (): string | undefined => {
+      const r = ctx.ui.router.current()
+      return r.type === "session" ? r.sessionID : undefined
+    }
+
     const show = (text: string, sessionID: string, key: string): void => {
       setPanel((d) => {
         const next = setLine(d, sessionID, text, key)
@@ -1176,6 +1290,18 @@ export default Plugin.define({
           },
         },
         {
+          id: "headsup.details",
+          title: "Show Inference Details",
+          description: "Open the full per-turn and session telemetry",
+          group: "opencode-headsup",
+          bind: "ctrl+shift+d",
+          palette: true,
+          slash: { name: "headsup" },
+          run: () => {
+            openDetails(currentSession())
+          },
+        },
+        {
           id: "headsup.panel",
           title: "Show Inference History",
           description: "Open or close the per-turn telemetry drill-down",
@@ -1240,6 +1366,9 @@ export default Plugin.define({
               <box flexDirection="column">
                 {drawBox(turnView, suffix, !ui.collapsed, toggleCollapsed, true)}
                 {summary ? drawBox(sessionView(summary), "", ui.sessionOpen === true, toggleSession, false) : null}
+                <text selectable={false} marginTop={1} marginLeft={3} onMouseDown={() => openDetails(input.sessionID)}>
+                  <span style={{ fg: themeColor("text.action", "text.action.base", "primary") as Color | undefined }}>details ›</span>
+                </text>
               </box>
             )
           },
