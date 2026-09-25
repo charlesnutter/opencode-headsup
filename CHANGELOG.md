@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.5.0] – 2026-09-25
 ### Changed
 - The details dialog is one column with three tabs -- Turn, Session and
   History -- switched with `tab`, instead of two side-by-side columns. It is
@@ -17,6 +17,9 @@
   panel. The tab lays each turn out in fixed columns, so a long row no
   longer wraps; `s` switches between this session and every session.
 - `/headsup session` and `/headsup history` open the dialog on those tabs.
+
+### Fixed
+- The History tab's headline says `1 turn`, not `1 turns`.
 
 ## [0.4.0] – 2026-09-25
 ### Added
