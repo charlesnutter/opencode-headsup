@@ -106,7 +106,9 @@ test("the engine section is marked, and says why when there are no engine figure
   assert.ok(withEngine.some((s) => s.title === "◆ Engine · MTPLX"), withEngine.map((s) => s.title).join(", "))
   const skipped = turnSections(buildTurnDetail(steps, marks, { ...base, engineNote: ["engine data skipped:", "overlapping requests"] }))
   const e = skipped.find((s) => s.title === "Engine · MTPLX")
-  assert.deepEqual(e.lines, ["no engine figures:", "engine data skipped:", "overlapping requests"])
+  assert.deepEqual(e.lines, ["MTPLX's figures were left out:", "engine data skipped:", "overlapping requests"])
+  const none = turnSections(buildTurnDetail(steps, marks, { ...base, engine: "openai" })).find((s) => s.title === "Engine · openai")
+  assert.deepEqual(none.lines, ["no engine telemetry for this provider"])
 })
 
 test("per-step engine rates are listed when the engine read each step", () => {

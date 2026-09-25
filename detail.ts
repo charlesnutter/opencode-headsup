@@ -90,6 +90,8 @@ export interface TurnDetail {
   engineNote?: string[]
   /** Compactions that ran during the turn, epoch ms. */
   compactions?: Array<readonly [number, number]>
+  /** What each compaction cost the engine, where it was bracketed by readings. */
+  compactionEngine?: string[]
   subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
 }
 
@@ -165,6 +167,7 @@ export function buildTurnDetail(
     stepEngine?: TurnDetail["stepEngine"]
     subagents?: TurnDetail["subagents"]
     compactions?: Array<readonly [number, number]>
+    compactionEngine?: string[]
   }
 ): TurnDetail {
   const tokens = { output: 0, reasoning: 0, input: 0, cacheRead: 0, cacheWrite: 0 }
@@ -273,6 +276,7 @@ export function buildTurnDetail(
     engineNote: base.engineNote,
     stepEngine: base.stepEngine,
     compactions: base.compactions && base.compactions.length > 0 ? base.compactions : undefined,
+    compactionEngine: base.compactionEngine && base.compactionEngine.length > 0 ? base.compactionEngine : undefined,
     subagents: base.subagents,
   }
 }
@@ -401,16 +405,17 @@ export function turnSections(d: TurnDetail): Section[] {
           ]
         : []
     )
-    out.push({
-      title: `${ENGINE_MARK} Engine · ${d.engine}`,
-      rows: d.engineRows,
-      lines: perStep.length > 1 ? ["", "per step", ...perStep] : undefined,
-    })
+    const lines = [
+      ...(perStep.length > 1 ? ["", "per step", ...perStep] : []),
+      ...(d.compactionEngine ? ["", "compaction, taken out of the above", ...d.compactionEngine] : []),
+    ]
+    out.push({ title: `${ENGINE_MARK} Engine · ${d.engine}`, rows: d.engineRows, lines: lines.length > 0 ? lines : undefined })
+  } else if (d.engineNote && d.engineNote.length > 0) {
+    // The engine reported; its figures were not used. Say which and why,
+    // rather than reading as though it had been silent.
+    out.push({ title: `Engine · ${d.engine}`, lines: [`${d.engine}'s figures were left out:`, ...d.engineNote] })
   } else {
-    out.push({
-      title: `Engine · ${d.engine}`,
-      lines: d.engineNote && d.engineNote.length > 0 ? ["no engine figures:", ...d.engineNote] : ["no engine figures for this turn"],
-    })
+    out.push({ title: `Engine · ${d.engine}`, lines: ["no engine telemetry for this provider"] })
   }
   if (d.subagents) {
     out.push({

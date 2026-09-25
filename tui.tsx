@@ -34,6 +34,7 @@ import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
 import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
+import { shiftBaseline, counterDelta } from "./counters"
 import { buildTurnDetail, turnSections, ENGINE_MARK, type TurnDetail, type Section } from "./detail"
 
 import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
@@ -557,8 +558,16 @@ export default Plugin.define({
        * counter-difference engine's window holds their requests too, so its
        * check expects the turn's tokens and steps plus theirs.
        */
-      sameEngine?: TurnRecord["subagents"]
+      sameEngine?: TurnRecord["subagents"],
+      /** Compactions in the turn, each bracketed by counter readings. */
+      bracketed: readonly Compaction[] = []
     ): Promise<TurnView | null> {
+      // Readings around each compaction on this engine, to take its request
+      // back out of a counter window.
+      const bracketsFor = <T extends object,>(): Array<{ before: T; after: T }> =>
+        bracketed
+          .filter((c) => c.provider === provider && c.before && c.after)
+          .map((c) => ({ before: c.before as T, after: c.after as T }))
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
       // host has the marks regardless of which tier renders the line. Passed
@@ -586,7 +595,8 @@ export default Plugin.define({
       ): Promise<TurnView | null> => {
         const now = await fetchPromSample(url, spec, http)
         if (!now) return null
-        const prev = base.prom[id]
+        const base0 = base.prom[id]
+        const prev = base0 ? shiftBaseline(base0, bracketsFor<PromSample>()) : base0
         setBase((d) => {
           d.prom[id] = now
         })
@@ -709,7 +719,8 @@ export default Plugin.define({
           const label = provider === "llamacpp" ? "llama.cpp" : "llamafile"
           const now = await fetchLlamaCppCounters(url, http)
           if (!now) return null // unreachable, or started without --metrics
-          const prev = base.llamacpp[provider]
+          const base0 = base.llamacpp[provider]
+          const prev = base0 ? shiftBaseline(base0, bracketsFor<LlamaCppCounters>()) : base0
           setBase((d) => {
             d.llamacpp[provider] = now
           })
@@ -731,7 +742,8 @@ export default Plugin.define({
         case "splash": {
           const now = await fetchSplashSample(cfg.splashBase, http)
           if (!now) return null
-          const prev = base.splash[cfg.splashBase]
+          const base0 = base.splash[cfg.splashBase]
+          const prev = base0 ? shiftBaseline(base0, bracketsFor<SplashSample>()) : base0
           setBase((d) => {
             d.splash[cfg.splashBase] = now
           })
@@ -963,12 +975,34 @@ export default Plugin.define({
     // name them in a turn's time and as the reason a counter window held more
     // than the turn (measured: a Splash turn with a sub-agent declined as
     // "overlapping requests"; the transcript showed a compaction in it).
-    const compactions = new Map<string, Array<[number, number | undefined]>>()
+    //
+    // For an engine that publishes cumulative counters, each compaction is
+    // also bracketed by a reading of its own at start and end, so its request
+    // can be taken back out of the turn's window (see counters.ts) instead of
+    // the whole turn being declined.
+    interface Compaction {
+      start: number
+      end?: number
+      provider?: string
+      before?: unknown
+      after?: unknown
+    }
+    const compactions = new Map<string, Compaction[]>()
+    const compactionsOverlapping = (sessionID: string, from: number, to: number): Compaction[] =>
+      (compactions.get(sessionID) ?? []).filter((c) => (c.end ?? to) > from && c.start < to)
     const compactionsIn = (sessionID: string, from: number, to: number): Array<readonly [number, number]> =>
-      (compactions.get(sessionID) ?? [])
-        .map(([a, b]) => [a, b ?? to] as const)
-        .filter(([a, b]) => b > from && a < to)
-        .map(([a, b]) => [Math.max(a, from), Math.min(b, to)] as const)
+      compactionsOverlapping(sessionID, from, to).map((c) => [Math.max(c.start, from), Math.min(c.end ?? to, to)] as const)
+    /** A cumulative-counter engine's reading, for bracketing a compaction. */
+    const readCounters = (provider: string): Promise<unknown> | undefined => {
+      const http: HttpOptions = { signal: life.signal }
+      const p = promTarget(provider)
+      if (p) return fetchPromSample(p.url, p.spec, http)
+      if (provider === "llamacpp") return fetchLlamaCppCounters(cfg.llamacppBase, http)
+      if (provider === "llamafile") return fetchLlamaCppCounters(cfg.llamafileBase, http)
+      if (provider === "splash") return fetchSplashSample(cfg.splashBase, http)
+      // oMLX publishes running averages, which can't be subtracted.
+      return undefined
+    }
 
     // Replies already reported, by their last step's id. A reply is reported
     // when its last step ends, and again asked for when the execution ends;
@@ -1098,7 +1132,9 @@ export default Plugin.define({
       try {
         // An unfinished reply's last step never completed, so the engine has
         // no reading of it to check against: OpenCode's figures only.
-        if (!opts.outcome) line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
+        const bracketed = compactionsOverlapping(sessionID, info.time.created, Date.now())
+        if (bracketed.some((c) => c.before && c.after)) dbg(`  taking ${bracketed.length} compaction(s) out of the window`)
+        if (!opts.outcome) line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine, bracketed)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -1152,6 +1188,15 @@ export default Plugin.define({
           engineNote: enriched ? undefined : [...line.notes],
           stepEngine: enriched ? tier2.stepEngine : undefined,
           compactions: turnCompactions,
+          compactionEngine: compactionsOverlapping(sessionID, info.time.created, Date.now()).flatMap((c) => {
+            if (!c.before || !c.after || c.provider !== provider) return []
+            const d = counterDelta(c.before as object, c.after as object) as Record<string, number | undefined>
+            const read = d["prefillTokens"] ?? d["promptTokens"] ?? d["prompt"]
+            const wrote = d["decodeTokens"] ?? d["predictedTokens"] ?? d["generation"]
+            return read !== undefined || wrote !== undefined
+              ? [`${read !== undefined ? `${Math.round(read).toLocaleString("en-US")} tok read` : ""}${read !== undefined && wrote !== undefined ? " · " : ""}${wrote !== undefined ? `${Math.round(wrote).toLocaleString("en-US")} written` : ""}`]
+              : []
+          }),
           subagents,
         })
         dbg(
@@ -1474,13 +1519,27 @@ export default Plugin.define({
           const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
           if (typeof sid !== "string") return
           const list = compactions.get(sid) ?? []
+          let c: Compaction | undefined
           if (end) {
-            const open = list.find(([, b]) => b === undefined)
-            if (open) open[1] = Date.now()
+            c = list.find((x) => x.end === undefined)
+            if (c) c.end = Date.now()
           } else {
-            list.push([Date.now(), undefined])
+            const provider = lastModel(ctx.data.session.message.list(sid) ?? [])?.providerID
+            c = { start: Date.now(), provider }
+            list.push(c)
             // A session compacts rarely; the last few are all a turn can need.
             while (list.length > 8) list.shift()
+          }
+          const target = c
+          const read = target?.provider ? readCounters(target.provider) : undefined
+          if (target && read) {
+            read
+              .then((sample) => {
+                if (end) target.after = sample ?? undefined
+                else target.before = sample ?? undefined
+                dbg(`  compaction ${end ? "after" : "before"} reading (${target.provider}): ${sample ? "ok" : "none"}`)
+              })
+              .catch(() => {})
           }
           compactions.set(sid, list)
           if (compactions.size > 64) {
