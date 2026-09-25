@@ -300,7 +300,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
     out.push([
       ...head,
       [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-      ...bar([[t.input, "gen", BAR], [t.cacheRead, "wait", BAR]],, rowBar(w)),
+      ...bar([[t.input, "gen", BAR], [t.cacheRead, "wait", BAR]], rowBar(w)),
       [`  ${n0(t.input)} fresh · ${n0(t.cacheRead)} cached (${share(t.cacheRead, prompt)})`, "dim"],
     ])
   }
@@ -310,7 +310,7 @@ export function turnLines(d: TurnDetail | undefined, w = CONTENT_WIDTH): Line[] 
     const tail: Line = d.context.limit
       ? [
           [" ".repeat(Math.max(1, BAR_AT - width(head))), ""],
-          ...bar([[d.context.used, "gen", BAR], [Math.max(0, d.context.limit - d.context.used), "wait", BAR]],, rowBar(w)),
+          ...bar([[d.context.used, "gen", BAR], [Math.max(0, d.context.limit - d.context.used), "wait", BAR]], rowBar(w)),
           [`  ${share(d.context.used, d.context.limit)} of ${n0(d.context.limit)}`, "dim"],
         ]
       : []
@@ -447,7 +447,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     for (const t of shown) {
       out.push([
         [`  ${t.name.slice(0, 10).padEnd(11)}`, "dim"],
-        ...bar([[t.s, "tool", BAR], [Math.max(0, most - t.s), "", " "]],, rowBar(w)),
+        ...bar([[t.s, "tool", BAR], [Math.max(0, most - t.s), "", " "]], rowBar(w)),
         [`  ${dur(t.s).padStart(7)}`, "bold"],
         [`  ${n0(t.n)} ${t.n === 1 ? "call" : "calls"}`, "dim"],
       ])
@@ -459,7 +459,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
   out.push(...titled("Coverage", w, "turns with the engine's own figures"))
   out.push(
     gridRow("engine", `${n0(f.coverage.engine)}/${n0(f.coverage.total)}`, [
-      ...bar([[f.coverage.engine, "gen", BAR], [f.coverage.total - f.coverage.engine, "wait", BAR]],, rowBar(w)),
+      ...bar([[f.coverage.engine, "gen", BAR], [f.coverage.total - f.coverage.engine, "wait", BAR]], rowBar(w)),
       [`  ${share(f.coverage.engine, f.coverage.total)} of turns`, "dim"],
     ])
   )
@@ -476,7 +476,7 @@ export function sessionLines(f: SessionFigures | undefined, w = CONTENT_WIDTH): 
     const cached = f.tokens.cacheRead ?? 0
     out.push(
       gridRow("prompt", n0(fresh + cached), [
-        ...bar([[fresh, "gen", BAR], [cached, "wait", BAR]],, rowBar(w)),
+        ...bar([[fresh, "gen", BAR], [cached, "wait", BAR]], rowBar(w)),
         [`  ${n0(fresh)} fresh · ${n0(cached)} cached (${share(cached, fresh + cached)})`, "dim"],
       ])
     )
