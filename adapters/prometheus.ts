@@ -9,7 +9,7 @@
 import { httpText, type HttpOptions } from "../http"
 import { sumLabeledMetric } from "../prometheus-text"
 import { nn, ni } from "../format"
-import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
+import { rowsOf, timeRows, viewText, nt, phase, type Row, type TurnView } from "../rows"
 export interface PromSpec {
   prefix: string
   promptTokens: string
@@ -346,7 +346,25 @@ export function promView(
     ["prompt", nt(diff.promptTokens)],
     ...rowsOf("cached", [diff.cachedTokens > 0 ? nt(diff.cachedTokens) : ""]),
   ]
-  return { engine: label, rows, notes: [], key: decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}` : undefined }
+  // The engine's own figures only: its rate and TTFT for a single request
+  // (over several, the counters give only means, and the host's stand in).
+  const detail: Row[] = [
+    ...rowsOf("speed", [single && diff.decodeTokS !== undefined ? `${nn(diff.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("ttft", [single && diff.ttft !== undefined ? `${nn(diff.ttft, 2)}s` : ""]),
+    ...rowsOf("prefill", [single && diff.prefillTokS !== undefined ? `${ni(diff.prefillTokS)} tok/s` : ""]),
+    ["tokens", nt(diff.completionTokens)],
+    ["prompt", `${nt(diff.promptTokens)} tok`],
+    ...rowsOf("cached", [diff.cachedTokens > 0 ? `${nt(diff.cachedTokens)} tok` : ""]),
+    ...rowsOf("request", [single && diff.durationS !== undefined ? `${nn(diff.durationS, 2)}s` : ""]),
+    ["requests", nt(ttftCount)],
+  ]
+  return {
+    engine: label,
+    rows,
+    notes: [],
+    key: decodeTokS !== undefined ? `${nn(decodeTokS)} tok/s${overall}` : undefined,
+    detail,
+  }
 }
 
 /** The view as text, or null when declined; kept for tests that look for a figure. */

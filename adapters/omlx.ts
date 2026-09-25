@@ -23,7 +23,7 @@
 
 import { httpJson, type HttpOptions } from "../http"
 import { nn, ni } from "../format"
-import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
+import { rowsOf, timeRows, viewText, nt, phase, type Row, type TurnView } from "../rows"
 
 /** Cumulative counters as this plugin reads them. */
 export interface OmlxSample {
@@ -132,6 +132,10 @@ export function omlxView(
       ],
       notes: [],
       key: `${nn(now.avgGen)} tok/s avg`,
+      detail: [
+        ["speed", `${nn(now.avgGen)} tok/s (server avg)`],
+        ["prefill", `${ni(now.avgPrefill)} tok/s (server avg)`],
+      ],
     }
   }
 
@@ -173,6 +177,16 @@ export function omlxView(
     ],
     notes: [],
     key: `${nn(decode)} tok/s${decodeLabel}`,
+    // The host's rate stands in when oMLX's can't be recovered; it is not
+    // the engine's, so the engine section leaves it out.
+    detail: [
+      ...rowsOf("speed", [useHostRate ? "" : `${nn(decode)} tok/s${decodeLabel}`]),
+      ["prefill", `${ni(prefill)} tok/s${prefillLabel}`],
+      ["tokens", nt(completion)],
+      ["prompt", `${nt(promptTokens)} tok`],
+      ...rowsOf("cached", [cached > 0 ? `${nt(cached)} tok` : ""]),
+      ["requests", nt(now.requests - prev.requests)],
+    ],
   }
 }
 

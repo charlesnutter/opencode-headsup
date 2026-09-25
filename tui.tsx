@@ -33,7 +33,9 @@ import { universalView, turnRate, turnSteps, turnUserAt, lastModel, aggregateTur
 import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
-import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
+import { summariseSession, sessionView, sessionSections, rollupSubagents, subagentRows } from "./session"
+import { shiftBaseline, counterDelta } from "./counters"
+import { buildTurnDetail, turnSections, ENGINE_MARK, SUBAGENT_TOOLS, type TurnDetail, type Section } from "./detail"
 
 import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -185,6 +187,11 @@ export default Plugin.define({
 
     // What the sidebar shows, one line per session (see panels.ts). Reactive:
     // writing it re-renders the slot. Memory-scoped, so it dies with the TUI.
+    // Each session's last turn in full, for the details dialog. Memory, like
+    // the panels: the dialog describes this run; history keeps the summary.
+    const [turnDetail, setTurnDetail] = ctx.storage.memory<{ bySession: Record<string, TurnDetail> }>("turnDetail", {
+      initial: { bySession: {} },
+    })
     const [panel, setPanel] = ctx.storage.memory<Panels>("panels", {
       initial: emptyPanels(),
     })
@@ -297,6 +304,169 @@ export default Plugin.define({
       )
     }
 
+    // ---- the details dialog ---------------------------------------------------
+    // A full-detail view opened from the sidebar: the last turn (detail.ts)
+    // beside the session (session.ts). Measured on 2.0.12 before it was
+    // built: ui.dialog.show draws at xlarge, 116 cells on a 214-column
+    // terminal; a scrollbox inside scrolls by wheel and by keys; a keymap
+    // layer inside the dialog takes tab without the prompt seeing it.
+    const [details, setDetails] = ctx.storage.memory<{ tab: "turn" | "session"; cols: number; rows: number }>(
+      "details",
+      { initial: { tab: "turn", cols: 0, rows: 0 } }
+    )
+    /** Below this many terminal columns the two columns are one, switched by tab. */
+    const TWO_COLUMN_MIN = 110
+    const DETAIL_COL = 46
+    // Whether our dialog is the one showing. The keybind toggles it: pressed
+    // again while it was open, it re-opened the dialog over itself (a blink).
+    let detailsOpen = false
+    const openDetails = (sessionID: string | undefined): void => {
+      if (detailsOpen) {
+        dbg("details: toggle closed")
+        ctx.ui.dialog.clear()
+        return
+      }
+      dbg(`details: open for ${sessionID ?? "no session"}; terminal ${ctx.renderer.terminalWidth}x${ctx.renderer.terminalHeight}`)
+      const stored = sessionID ? lineFor(panel, sessionID) : PLACEHOLDER
+      const turnView: TurnView =
+        stored === PLACEHOLDER ? { engine: "last turn", rows: [], notes: ["no turn yet"] } : decodeView(stored)
+      const summary = summariseSession(history.turns, sessionID)
+      const sessView: TurnView = summary ? sessionView(summary) : { engine: "Session", rows: [], notes: ["no turns yet"] }
+      let scroll: { scrollBy?: (d: number) => void; width?: number; height?: number; focus?: () => void } | undefined
+      let root: { width?: number; height?: number } | undefined
+      // The terminal's size, kept current while the dialog is open, so a
+      // resize re-lays it out (one column or two, and the body's height).
+      const sized = (cols: number, rows: number): void => {
+        setDetails((d) => {
+          d.cols = cols
+          d.rows = rows
+        })
+      }
+      sized(ctx.renderer.terminalWidth, ctx.renderer.terminalHeight)
+      const onResize = (cols: number, rows: number): void => {
+        dbg(`details: resize ${cols}x${rows}`)
+        sized(cols, rows)
+      }
+      ctx.renderer.on("resize", onResize)
+      detailsOpen = true
+      ctx.ui.dialog.show(
+        () => {
+          const subdued = subduedColor()
+          const wide = (): boolean => details.cols >= TWO_COLUMN_MIN
+          // Title, blank, blank, footer, the dialog's own padding, and room
+          // above and below it on screen.
+          const pageRows = (): number => Math.max(4, details.rows - 16)
+          ctx.keymap.layer(() => ({
+            mode: "global",
+            priority: 100,
+            commands: [
+              {
+                title: "Switch turn / session",
+                bind: "tab",
+                run: () => {
+                  setDetails((d) => {
+                    d.tab = d.tab === "turn" ? "session" : "turn"
+                  })
+                  dbg(`details: tab -> ${details.tab}`)
+                },
+              },
+              { title: "Scroll down", bind: "down", run: () => scroll?.scrollBy?.(1) },
+              { title: "Scroll up", bind: "up", run: () => scroll?.scrollBy?.(-1) },
+              { title: "Page down", bind: "pagedown", run: () => scroll?.scrollBy?.(pageRows()) },
+              { title: "Page up", bind: "pageup", run: () => scroll?.scrollBy?.(-pageRows()) },
+            ],
+          }))
+          const column = (title: string, sections: Section[]) => (
+            <box flexDirection="column" width={DETAIL_COL}>
+              <text selectable={false}>
+                <b>{title}</b>
+              </text>
+              {sections.map((sec) => (
+                <box flexDirection="column" marginTop={1}>
+                  <text selectable={false}>
+                    <b>{sec.title}</b>
+                  </text>
+                  {(sec.rows ?? []).map(([label, value]) => (
+                    <text selectable={false}>
+                      <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
+                      {value}
+                    </text>
+                  ))}
+                  {(sec.lines ?? []).map((l, i) => (
+                    <text selectable={false} fg={i === 0 && sec.title.startsWith("Steps") ? subdued : undefined}>
+                      {l || " "}
+                    </text>
+                  ))}
+                </box>
+              ))}
+            </box>
+          )
+          const detail = sessionID ? turnDetail.bySession[sessionID] : undefined
+          const turnTitle = `Last turn · ${detail?.engine ?? turnView.engine}${detail?.outcome ? ` · ${detail.outcome}` : ""}`
+          const turnCol = (): Section[] =>
+            detail ? turnSections(detail) : [{ title: "No turn yet in this run", lines: ["Details start with the next turn."] }]
+          const sessCol = (): Section[] => sessionSections(history.turns, sessionID)
+          setTimeout(() => {
+            dbg(
+              `details: wide ${wide()}; dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; ` +
+                `scrollbox ${scroll?.width ?? "?"}x${scroll?.height ?? "?"}`
+            )
+          }, 300)
+          return (
+            <box
+              flexDirection="column"
+              paddingLeft={2}
+              paddingRight={2}
+              paddingTop={1}
+              paddingBottom={1}
+              ref={(r: unknown) => (root = r as typeof root)}
+            >
+              <text selectable={false}>
+                <b>Heads Up</b>
+                <span style={{ fg: subdued }}>
+                  {wide() ? "" : `  ·  ${details.tab === "turn" ? "[turn] session" : "turn [session]"}  tab switches`}
+                </span>
+              </text>
+              <text selectable={false}> </text>
+              <scrollbox
+                ref={(r: unknown) => {
+                  scroll = r as typeof scroll
+                  scroll?.focus?.()
+                }}
+                scrollY
+                height={pageRows()}
+              >
+                {wide() ? (
+                  <box flexDirection="row" gap={4}>
+                    {column(turnTitle, turnCol())}
+                    {column(sessView.engine, sessCol())}
+                  </box>
+                ) : details.tab === "turn" ? (
+                  column(turnTitle, turnCol())
+                ) : (
+                  column(sessView.engine, sessCol())
+                )}
+              </scrollbox>
+              <text selectable={false}> </text>
+              <text selectable={false} fg={subdued}>
+                {`${ENGINE_MARK} measured by the engine; the rest is OpenCode's  ·  ↑↓ pgup pgdn  ·  esc`}
+              </text>
+            </box>
+          )
+        },
+        () => {
+          ctx.renderer.off("resize", onResize)
+          detailsOpen = false
+          dbg("details: closed")
+        }
+      )
+      ctx.ui.dialog.set({ size: "xlarge", centered: true })
+    }
+    const currentSession = (): string | undefined => {
+      const r = ctx.ui.router.current()
+      return r.type === "session" ? r.sessionID : undefined
+    }
+
     const show = (text: string, sessionID: string, key: string): void => {
       setPanel((d) => {
         const next = setLine(d, sessionID, text, key)
@@ -377,6 +547,10 @@ export default Plugin.define({
         sharedWindow: boolean
         /** Engine-only figures of an accepted reading, for the history row. */
         engine?: TurnRecord["engine"]
+        /** Each step's own engine reading, where the engine is read per step. */
+        stepEngine?: TurnDetail["stepEngine"]
+        /** A counter engine's reading at the turn's end. */
+        endSample?: unknown
       },
       /** The turn's assistant messages, one per step, oldest first. */
       steps: readonly SessionMessageAssistant[],
@@ -385,8 +559,22 @@ export default Plugin.define({
        * counter-difference engine's window holds their requests too, so its
        * check expects the turn's tokens and steps plus theirs.
        */
-      sameEngine?: TurnRecord["subagents"]
+      sameEngine?: TurnRecord["subagents"],
+      /** Compactions in the turn, each bracketed by counter readings. */
+      bracketed: readonly Compaction[] = [],
+      /**
+       * This turn's own starting reading of a counter engine, taken when the
+       * turn started. Preferred to the engine-wide baseline, which another
+       * session's report -- a sub-agent's, on the same engine -- moves.
+       */
+      startSample?: unknown
     ): Promise<TurnView | null> {
+      // Readings around each compaction on this engine, to take its request
+      // back out of a counter window.
+      const bracketsFor = <T extends object,>(): Array<{ before: T; after: T }> =>
+        bracketed
+          .filter((c) => c.provider === provider && c.before && c.after)
+          .map((c) => ({ before: c.before as T, after: c.after as T }))
       // OpenCode's own ttft for this turn. Five provider ids report none of
       // their own (omlx, llamacpp, llamafile, splash, koboldcpp), and the
       // host has the marks regardless of which tier renders the line. Passed
@@ -414,7 +602,9 @@ export default Plugin.define({
       ): Promise<TurnView | null> => {
         const now = await fetchPromSample(url, spec, http)
         if (!now) return null
-        const prev = base.prom[id]
+        tier2.endSample = now
+        const base0 = (startSample as PromSample | undefined) ?? base.prom[id]
+        const prev = base0 ? shiftBaseline(base0, bracketsFor<PromSample>()) : base0
         setBase((d) => {
           d.prom[id] = now
         })
@@ -487,6 +677,15 @@ export default Plugin.define({
             if (receipts.every((r) => r !== null)) tier2.sharedWindow = true
             return null
           }
+          tier2.stepEngine = receipts.map((r) =>
+            r
+              ? {
+                  decodeTokS: r.decode_tok_s ?? undefined,
+                  prefillTokS: r.prefill_tok_s ?? undefined,
+                  ttftS: r.ttft_s ?? undefined,
+                }
+              : undefined
+          )
           const verifies = combined.verify_calls ?? 0
           tier2.engine = {
             prefillTokS: combined.prefill_tok_s ?? undefined,
@@ -528,7 +727,9 @@ export default Plugin.define({
           const label = provider === "llamacpp" ? "llama.cpp" : "llamafile"
           const now = await fetchLlamaCppCounters(url, http)
           if (!now) return null // unreachable, or started without --metrics
-          const prev = base.llamacpp[provider]
+          tier2.endSample = now
+          const base0 = (startSample as LlamaCppCounters | undefined) ?? base.llamacpp[provider]
+          const prev = base0 ? shiftBaseline(base0, bracketsFor<LlamaCppCounters>()) : base0
           setBase((d) => {
             d.llamacpp[provider] = now
           })
@@ -550,7 +751,9 @@ export default Plugin.define({
         case "splash": {
           const now = await fetchSplashSample(cfg.splashBase, http)
           if (!now) return null
-          const prev = base.splash[cfg.splashBase]
+          tier2.endSample = now
+          const base0 = (startSample as SplashSample | undefined) ?? base.splash[cfg.splashBase]
+          const prev = base0 ? shiftBaseline(base0, bracketsFor<SplashSample>()) : base0
           setBase((d) => {
             d.splash[cfg.splashBase] = now
           })
@@ -589,6 +792,9 @@ export default Plugin.define({
               return null
             }
             tier2.engine = { prefillTokS: combined.prefillTokS, draftAccept: combined.draftAcceptRate }
+            tier2.stepEngine = perfs.map((p) =>
+              p ? { decodeTokS: p.last_eval_speed || undefined, prefillTokS: p.last_process_speed || undefined } : undefined
+            )
             return koboldView(combined, hostTtft, hostFigures)
           }
           // No per-step reads: one read now, which can only describe the
@@ -685,6 +891,26 @@ export default Plugin.define({
       return promTarget(provider)?.label ?? known[provider] ?? provider
     }
 
+    /** Whether any adapter reads this provider's engine. */
+    function hasAdapter(provider: string): boolean {
+      return engineLabel(provider) !== provider || promTarget(provider) !== undefined || provider === "llamafile"
+    }
+
+    /** A turn's tool time and calls per tool name, sub-agents excluded. */
+    function toolsByName(d: TurnDetail): Record<string, { s: number; n: number }> | undefined {
+      const out: Record<string, { s: number; n: number }> = {}
+      for (const st of d.steps) {
+        for (const t of st.tools) {
+          if (SUBAGENT_TOOLS.has(t.name)) continue
+          const cur = out[t.name] ?? { s: 0, n: 0 }
+          cur.s += t.seconds ?? 0
+          cur.n += 1
+          out[t.name] = cur
+        }
+      }
+      return Object.keys(out).length > 0 ? out : undefined
+    }
+
     // ---- baseline priming ---------------------------------------------------
     // A counter-difference engine is read at each turn's end, and that reading
     // is the next turn's baseline -- so the first turn after launch had none
@@ -774,6 +1000,46 @@ export default Plugin.define({
     // a turn in one tab suppress another tab's line (see panels.ts).
     const latest = new LatestPerKey()
 
+    // Compactions per session, epoch ms: OpenCode summarising the conversation
+    // to fit the context, as a request of its own to the same engine. Kept to
+    // name them in a turn's time and as the reason a counter window held more
+    // than the turn (measured: a Splash turn with a sub-agent declined as
+    // "overlapping requests"; the transcript showed a compaction in it).
+    //
+    // For an engine that publishes cumulative counters, each compaction is
+    // also bracketed by a reading of its own at start and end, so its request
+    // can be taken back out of the turn's window (see counters.ts) instead of
+    // the whole turn being declined.
+    interface Compaction {
+      start: number
+      end?: number
+      provider?: string
+      before?: unknown
+      after?: unknown
+    }
+    const compactions = new Map<string, Compaction[]>()
+    // Each session's reading of its counter engine when its current turn
+    // started. The engine-wide baseline alone can't bracket a turn: a
+    // sub-agent on the same engine reports first, moving it to after the
+    // sub-agent, and the parent's window then held only its last step
+    // (found by the end-to-end suite; live, it read as "overlapping requests").
+    const turnStart = new Map<string, { provider: string; sample: unknown }>()
+    const compactionsOverlapping = (sessionID: string, from: number, to: number): Compaction[] =>
+      (compactions.get(sessionID) ?? []).filter((c) => (c.end ?? to) > from && c.start < to)
+    const compactionsIn = (sessionID: string, from: number, to: number): Array<readonly [number, number]> =>
+      compactionsOverlapping(sessionID, from, to).map((c) => [Math.max(c.start, from), Math.min(c.end ?? to, to)] as const)
+    /** A cumulative-counter engine's reading, for bracketing a compaction. */
+    const readCounters = (provider: string): Promise<unknown> | undefined => {
+      const http: HttpOptions = { signal: life.signal }
+      const p = promTarget(provider)
+      if (p) return fetchPromSample(p.url, p.spec, http)
+      if (provider === "llamacpp") return fetchLlamaCppCounters(cfg.llamacppBase, http)
+      if (provider === "llamafile") return fetchLlamaCppCounters(cfg.llamafileBase, http)
+      if (provider === "splash") return fetchSplashSample(cfg.splashBase, http)
+      // oMLX publishes running averages, which can't be subtracted.
+      return undefined
+    }
+
     // Replies already reported, by their last step's id. A reply is reported
     // when its last step ends, and again asked for when the execution ends;
     // it must render once.
@@ -819,6 +1085,10 @@ export default Plugin.define({
       const turn = agg.turn
       if (!info) return
       dbg(`report: ${sessionID} ending ${lastID}${opts.outcome ? ` (${opts.outcome})` : ""}; ${steps.length} step(s)`)
+      const turnCompactions = compactionsIn(sessionID, info.time.created, Date.now())
+      if (turnCompactions.length > 0) {
+        dbg(`  compaction during turn: ${turnCompactions.map(([a, b]) => `${((b - a) / 1000).toFixed(2)}s`).join(", ")}`)
+      }
       dbg(
         `turn: ${steps.length} assistant message(s) [${steps
           .map((m) => `${(m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)}${m.finish ? `/${m.finish}` : ""}`)
@@ -885,7 +1155,13 @@ export default Plugin.define({
         dbg(`sub-agent lookup threw: ${String(e)}`)
       }
 
-      const tier2: { pendingBaseline: boolean; sharedWindow: boolean; engine?: TurnRecord["engine"] } = {
+      const tier2: {
+        pendingBaseline: boolean
+        sharedWindow: boolean
+        engine?: TurnRecord["engine"]
+        stepEngine?: TurnDetail["stepEngine"]
+        endSample?: unknown
+      } = {
         pendingBaseline: false,
         sharedWindow: false,
       }
@@ -893,7 +1169,16 @@ export default Plugin.define({
       try {
         // An unfinished reply's last step never completed, so the engine has
         // no reading of it to check against: OpenCode's figures only.
-        if (!opts.outcome) line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine)
+        const bracketed = compactionsOverlapping(sessionID, info.time.created, Date.now())
+        if (bracketed.some((c) => c.before && c.after)) dbg(`  taking ${bracketed.length} compaction(s) out of the window`)
+        const start = turnStart.get(sessionID)
+        const startSample = start?.provider === provider ? start.sample : undefined
+        if (!opts.outcome) {
+          line = await enrich(provider, model, info, turn, http, tier2, steps, sameEngine, bracketed, startSample)
+        }
+        // The end of this reply starts the next one in the same execution.
+        if (tier2.endSample) turnStart.set(sessionID, { provider, sample: tier2.endSample })
+        else turnStart.delete(sessionID)
         // Recorded before the fallback overwrites it, so history knows which
         // tier the figures actually came from.
       } catch (e: unknown) {
@@ -917,16 +1202,63 @@ export default Plugin.define({
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
         // magnitude when it does. Split to fit the box's 32 cells.
-        if (opts.outcome) {
+        if (!opts.outcome && tier2.sharedWindow && turnCompactions.length > 0) {
+          line.notes.push("engine data skipped:", "compaction ran this turn")
+        } else if (opts.outcome) {
           // OpenCode records no tokens for a step it stopped mid-stream
           // (measured: an interrupted reply's step came back 0/error after 7s
           // of thinking), so a 0 here is unknown, not none.
           const out0 = (info.tokens?.output ?? 0) + (info.tokens?.reasoning ?? 0)
           if (out0 === 0) line.rows = line.rows.filter(([label]) => label !== "tokens" && label !== "speed")
           line.notes.push(opts.outcome)
-        }
-        else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
+        } else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
         else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
+      }
+
+      // The turn in full, for the dialog. Built before the stream marks are
+      // released below, and from the rows before sub-agent rows join them:
+      // those are OpenCode's, kept in the detail's own sub-agent section.
+      let detail: TurnDetail | undefined
+      try {
+        detail = buildTurnDetail(steps, turns, {
+          sessionID,
+          provider,
+          model,
+          engine: engineLabel(provider),
+          at: Date.now(),
+          totalS: turnRate(0, info, turn).total,
+          outcome: opts.outcome,
+          contextLimit: contextLimitFor(provider, model),
+          engineRows: enriched ? [...(line.detail ?? line.rows)] : [],
+          engineNote: enriched ? undefined : [...line.notes],
+          stepEngine: enriched ? tier2.stepEngine : undefined,
+          compactions: turnCompactions,
+          compactionEngine: compactionsOverlapping(sessionID, info.time.created, Date.now()).flatMap((c) => {
+            if (!c.before || !c.after || c.provider !== provider) return []
+            const d = counterDelta(c.before as object, c.after as object) as Record<string, number | undefined>
+            const read = d["prefillTokens"] ?? d["promptTokens"] ?? d["prompt"]
+            const wrote = d["decodeTokens"] ?? d["predictedTokens"] ?? d["generation"]
+            return read !== undefined || wrote !== undefined
+              ? [`${read !== undefined ? `${Math.round(read).toLocaleString("en-US")} tok read` : ""}${read !== undefined && wrote !== undefined ? " · " : ""}${wrote !== undefined ? `${Math.round(wrote).toLocaleString("en-US")} written` : ""}`]
+              : []
+          }),
+          subagents,
+        })
+        const dd = detail
+        dbg(
+          `detail: ${dd.steps.length} step(s); tools [${dd.steps.flatMap((st) => st.tools.map((t) => `${t.name}:${t.seconds?.toFixed(2) ?? t.status}`)).join(", ")}]` +
+            (dd.time ? `; split ${Object.entries(dd.time).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")} of ${dd.totalS?.toFixed(2)}` : "")
+        )
+        setTurnDetail((d) => {
+          d.bySession[sessionID] = dd
+          const keys = Object.keys(d.bySession)
+          if (keys.length > 32) {
+            const oldest = keys.sort((a, b) => (d.bySession[a]?.at ?? 0) - (d.bySession[b]?.at ?? 0))[0]
+            if (oldest) delete d.bySession[oldest]
+          }
+        })
+      } catch (e: unknown) {
+        dbg(`detail threw: ${String(e)}`)
       }
 
       if (subagents) line.rows.push(...subagentRows(subagents))
@@ -961,6 +1293,25 @@ export default Plugin.define({
         engine: enriched ? tier2.engine : undefined,
         subagents,
         outcome: opts.outcome,
+        // For the dialog's session column.
+        cacheWrite: detail?.tokens.cacheWrite || undefined,
+        toolsS: detail?.time?.tools,
+        compactionS: detail?.time?.compaction || undefined,
+        tools: detail ? toolsByName(detail) : undefined,
+        retryReasons: detail?.steps.flatMap((st) => (st.retryReason ? [st.retryReason] : [])),
+        skip: enriched
+          ? undefined
+          : opts.outcome
+            ? "unfinished"
+            : tier2.pendingBaseline
+              ? "baseline"
+              : tier2.sharedWindow
+                ? turnCompactions.length > 0
+                  ? "compaction"
+                  : "overlap"
+                : hasAdapter(provider)
+                  ? "unavailable"
+                  : "no-adapter",
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns
@@ -1041,6 +1392,19 @@ export default Plugin.define({
           const m = selectedModel.get(sid) ?? lastModel(ctx.data.session.message.list(sid) ?? [])
           dbg(`prime lookup ${sid}: ${m ? `${m.providerID}/${m.id}` : "no model known"}`)
           if (m) void prime(m.providerID)
+          const read = m ? readCounters(m.providerID) : undefined
+          turnStart.delete(sid)
+          if (m && read) {
+            read
+              .then((sample) => {
+                if (sample) turnStart.set(sid, { provider: m.providerID, sample })
+                if (turnStart.size > 64) {
+                  const oldest = turnStart.keys().next().value
+                  if (oldest !== undefined && oldest !== sid) turnStart.delete(oldest)
+                }
+              })
+              .catch(() => {})
+          }
         })
       )
       off.push(
@@ -1226,6 +1590,45 @@ export default Plugin.define({
           }, 50)
         })
       )
+      // Compactions: when each started and ended, per session.
+      const compactionEvent =
+        (end: boolean) =>
+        (evt: unknown): void => {
+          const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
+          if (typeof sid !== "string") return
+          const list = compactions.get(sid) ?? []
+          let c: Compaction | undefined
+          if (end) {
+            c = list.find((x) => x.end === undefined)
+            if (c) c.end = Date.now()
+          } else {
+            const provider = lastModel(ctx.data.session.message.list(sid) ?? [])?.providerID
+            c = { start: Date.now(), provider }
+            list.push(c)
+            // A session compacts rarely; the last few are all a turn can need.
+            while (list.length > 8) list.shift()
+          }
+          const target = c
+          const read = target?.provider ? readCounters(target.provider) : undefined
+          if (target && read) {
+            read
+              .then((sample) => {
+                if (end) target.after = sample ?? undefined
+                else target.before = sample ?? undefined
+                dbg(`  compaction ${end ? "after" : "before"} reading (${target.provider}): ${sample ? "ok" : "none"}`)
+              })
+              .catch(() => {})
+          }
+          compactions.set(sid, list)
+          if (compactions.size > 64) {
+            const oldest = compactions.keys().next().value
+            if (oldest !== undefined && oldest !== sid) compactions.delete(oldest)
+          }
+          dbg(`event compaction.${end ? "ended" : "started"} ${sid}`)
+        }
+      off.push(ctx.data.on("session.compaction.started", compactionEvent(false)))
+      off.push(ctx.data.on("session.compaction.ended", compactionEvent(true)))
+      off.push(ctx.data.on("session.compaction.failed", compactionEvent(true)))
       // An execution stopped before its reply finished still used the engine;
       // the reply is shown, marked, rather than leaving the previous turn up.
       off.push(
@@ -1288,6 +1691,18 @@ export default Plugin.define({
           palette: true,
           run: () => {
             toggleCollapsed()
+          },
+        },
+        {
+          id: "headsup.details",
+          title: "Show Inference Details",
+          description: "Open the full per-turn and session telemetry",
+          group: "opencode-headsup",
+          bind: "ctrl+shift+d",
+          palette: true,
+          slash: { name: "headsup" },
+          run: () => {
+            openDetails(currentSession())
           },
         },
         {
@@ -1355,6 +1770,12 @@ export default Plugin.define({
               <box flexDirection="column">
                 {drawBox(turnView, suffix, !ui.collapsed, toggleCollapsed, true)}
                 {summary ? drawBox(sessionView(summary), "", ui.sessionOpen === true, toggleSession, false) : null}
+                {/* On release, not press: opened on press, the dialog's backdrop
+                    took the release as a click outside and closed it at once
+                    (measured: open and close 1ms apart). */}
+                <text selectable={false} marginTop={1} marginLeft={3} onMouseUp={() => openDetails(input.sessionID)}>
+                  <span style={{ fg: themeColor("text.action.base", "text.action", "primary") as Color | undefined }}>details ›</span>
+                </text>
               </box>
             )
           },

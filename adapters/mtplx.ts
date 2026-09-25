@@ -140,7 +140,24 @@ export function mtplxView(
       rows.push(["accepted", `${l.mean_accept_probability_by_depth.map((p) => Math.round(p * 100)).join("/")}%`])
     }
   }
-  return { engine: "MTPLX", rows, notes: [], key: decode !== undefined ? `${nn(decode)} tok/s` : undefined }
+  // The dialog's engine section: MTPLX's own figures only, with the verify
+  // passes behind the MTP rate and acceptance at every depth.
+  const depths = Array.isArray(l.mean_accept_probability_by_depth) ? l.mean_accept_probability_by_depth : []
+  const detail: Row[] = [
+    ...rowsOf("speed", [decode !== undefined ? `${nn(decode)} tok/s` : ""]),
+    ...rowsOf("ttft", [ttft !== undefined ? `${nn(ttft, 2)}s` : ""]),
+    ...rowsOf("prefill", [prefill !== undefined ? `${ni(prefill)} tok/s` : ""]),
+    ...rowsOf("tokens", [completion !== undefined ? nt(completion) : ""]),
+    ...rowsOf("request", [num(l.request_elapsed_s) !== undefined ? `${nn(num(l.request_elapsed_s) as number, 2)}s` : ""]),
+    ...(verify !== undefined && verify > 0 && completion !== undefined
+      ? rowsOf("MTP", [`${nn(completion / verify, 2)}x`, `${nt(verify)} verify passes`])
+      : []),
+    ...rowsOf(
+      "accepted",
+      depths.map((p, i) => `${Math.round(p * 100)}% at depth ${i + 1}`)
+    ),
+  ]
+  return { engine: "MTPLX", rows, notes: [], key: decode !== undefined ? `${nn(decode)} tok/s` : undefined, detail }
 }
 
 /** The view as text; kept for tests that look for a figure. */

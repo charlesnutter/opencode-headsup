@@ -22,7 +22,7 @@
 import { sumLabeledMetric } from "../prometheus-text"
 import { httpText, type HttpOptions } from "../http"
 import { nn, ni } from "../format"
-import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
+import { rowsOf, timeRows, viewText, nt, phase, type Row, type TurnView } from "../rows"
 
 export interface LlamaCppCounters {
   promptTokens: number
@@ -142,7 +142,12 @@ export function llamaCppView(
     ...rowsOf("tokens", [nt(t.completionTokens), host.includesSubagents ? "incl. sub-agents" : ""]),
     ...timeRows(host.total ?? t.decodeS + t.prefillS, host.retries),
   ]
-  return { engine: label, rows, notes: [], key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+  const detail: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("prefill", [t.prefillTokS !== undefined ? `${ni(t.prefillTokS)} tok/s` : "", phase(t.promptTokens, t.prefillS)]),
+    ["decode", phase(t.completionTokens, t.decodeS)],
+  ]
+  return { engine: label, rows, notes: [], key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined, detail }
 }
 
 /** The view as text; kept for tests that look for a figure. */

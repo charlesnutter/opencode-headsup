@@ -1,3 +1,34 @@
+## [Unreleased]
+### Added
+- A **details dialog**, opened by `details ›` under the sidebar boxes,
+  `ctrl+shift+d` or `/headsup`, and closed the same way or with `esc`. Last
+  turn on the left, session on the right; one at a time below 110 columns,
+  switched with `tab`. The sidebar is unchanged.
+  - Last turn: where the time went, in seconds and shares that add up to the
+    total; every step with its tool calls and their times; tokens in all
+    five kinds and context used; the engine's own figures only, marked `◆`,
+    including MTPLX acceptance at every depth and per-step engine rates;
+    retry reasons in full.
+  - Session: speed and time-to-first-token spread (min, median, p90, max),
+    time split in seconds, tools by time, retries by reason, and coverage:
+    how many turns had engine figures and why the others did not.
+- Compaction is named. OpenCode compacting the conversation mid-turn gets
+  its own share of the turn's time, and the step it delayed says so. On an
+  engine that publishes cumulative counters (Splash, llama.cpp, llamafile,
+  the vLLM family), the compaction's own request is read before and after
+  and taken out of the turn, so the turn keeps its engine figures; where it
+  can't be, the reason reads `compaction ran this turn`.
+
+### Fixed
+- A sub-agent on the same counter engine as its parent no longer makes the
+  parent's turn lose its engine figures. The sub-agent's own report moved
+  the engine-wide starting reading, so the parent's window held only its
+  last step and was declined as `overlapping requests`. Each turn now takes
+  its own starting reading when it starts.
+- When engine figures were declined, the dialog says the engine's figures
+  were left out and why, rather than reading as though the engine reported
+  nothing.
+
 ## [0.3.3] – 2026-09-25
 ### Fixed
 - Generation speed counts the time a model spends writing a tool call's

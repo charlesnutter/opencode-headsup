@@ -212,4 +212,17 @@ test("the total shown is OpenCode's -- what you waited -- with retries named", (
   assert.ok(!out.includes("4.48"), out)
 })
 
+// ---- the details dialog's engine section -----------------------------------
+test("the engine detail is MTPLX's own figures, with every acceptance depth", () => {
+  const v = mtplxView(completed.latest, { total: 999, retries: 3 })
+  const vals = v.detail.map(([, val]) => val).join("\n")
+  // OpenCode's total and retries are not the engine's.
+  assert.ok(!vals.includes("999"), vals)
+  assert.ok(!vals.includes("retr"), vals)
+  const depths = completed.latest.mean_accept_probability_by_depth
+  depths.forEach((_, i) => assert.ok(vals.includes(`depth ${i + 1}`), vals))
+  assert.ok(vals.includes("verify passes"), vals)
+  v.detail.forEach(([l, val]) => assert.ok(12 + val.length <= 46, `${l}: ${val}`))
+})
+
 console.log(`\n${passed} passed`)
