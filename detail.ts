@@ -49,6 +49,10 @@ export interface StepDetail {
   retryReason?: string
   /** Seconds of this step's wait for its first token spent on compaction. */
   compactionS?: number
+  /** Epoch ms: the step's request, its first token and its last, for the timeline. */
+  createdAt: number
+  firstAt?: number
+  lastAt?: number
   error?: string
 }
 
@@ -193,6 +197,9 @@ export function buildTurnDetail(
       retries: Math.max(0, (t?.attempts ?? 1) - 1),
       retryReason: m.retry?.error?.message,
       error: m.error?.message,
+      createdAt: m.time.created,
+      firstAt: t?.firstAt,
+      lastAt: t?.lastAt,
     }
     if (t?.firstAt !== undefined && t.firstAt > m.time.created) {
       s.ttftS = (t.firstAt - m.time.created) / 1000
@@ -303,15 +310,6 @@ export function wrap(text: string, width: number): string[] {
   return out
 }
 
-/** A titled block of the dialog: labelled rows, or preformatted lines. */
-export interface Section {
-  title: string
-  rows?: Row[]
-  lines?: string[]
-}
-
-const secs = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${s.toFixed(2)}s`)
-const n0 = (v: number): string => Math.round(v).toLocaleString("en-US")
 
 /**
  * Largest-remainder rounding, so shares of a whole add up to exactly 100.
@@ -330,103 +328,4 @@ export function percents(parts: readonly number[]): number[] {
     left--
   }
   return floor
-}
-
-/** The turn column's sections. Widths fit a 46-cell column. */
-export function turnSections(d: TurnDetail): Section[] {
-  const out: Section[] = []
-  if (d.time && d.totalS !== undefined) {
-    const parts: Array<[string, number]> = [
-      ["waiting", d.time.waiting],
-      ["generating", d.time.generating],
-      ["tools", d.time.tools],
-      ["sub-agents", d.time.subagents],
-      ["compaction", d.time.compaction],
-      ["other", d.time.other],
-    ]
-    const shown = parts.filter(([label, v]) => v > 0 || label === "waiting" || label === "generating")
-    const pct = percents(shown.map(([, v]) => v))
-    out.push({
-      title: `Where the time went · ${secs(d.totalS)}`,
-      rows: shown.map(([label, v], i) => [label, `${secs(v).padStart(8)}  ${String(pct[i]).padStart(3)}%`] as const),
-    })
-  }
-  if (d.steps.length > 0) {
-    const lines = ["#  tokens  tok/s    ttft  tool"]
-    d.steps.forEach((s, i) => {
-      const tok = s.output + s.reasoning
-      const rate = s.streamS && s.streamS > 0 ? (tok / s.streamS).toFixed(1) : "—"
-      const ttft = s.ttftS !== undefined ? `${s.ttftS.toFixed(2)}s` : "—"
-      const head = `${String(i + 1).padEnd(2)} ${n0(tok).padStart(6)}  ${rate.padStart(5)}  ${ttft.padStart(6)}  `
-      const tools = s.tools.length > 0 ? s.tools : [undefined]
-      tools.forEach((t, j) => {
-        const tail = t
-          ? `${t.name.slice(0, 9).padEnd(9)} ${t.seconds !== undefined ? secs(t.seconds) : t.status}`
-          : s.finish && s.finish !== "tool-calls"
-            ? `— ${s.finish}`
-            : ""
-        lines.push((j === 0 ? head : " ".repeat(head.length)) + tail)
-      })
-      if (s.retries > 0) lines.push(`${" ".repeat(3)}${s.retries} ${s.retries === 1 ? "retry" : "retries"}`)
-      if (s.compactionS !== undefined && s.compactionS > 0) lines.push(`${" ".repeat(3)}waited on compaction ${secs(s.compactionS)}`)
-    })
-    out.push({ title: `Steps · ${d.steps.length}`, lines })
-    // The reasons in full, wrapped: the table only has room for a count.
-    const reasons = d.steps.flatMap((s, i) =>
-      [s.retryReason ? `step ${i + 1}: ${s.retryReason}` : "", s.error ? `step ${i + 1} failed: ${s.error}` : ""].filter(Boolean)
-    )
-    if (reasons.length > 0) out.push({ title: "Retries and errors", lines: reasons.flatMap((r) => wrap(r, 46)) })
-  }
-  const t = d.tokens
-  const rows: Row[] = [
-    ["output", n0(t.output)],
-    ...(t.reasoning > 0
-      ? ([["reasoning", `${n0(t.reasoning)}  (${Math.round((t.reasoning / Math.max(1, t.output + t.reasoning)) * 100)}% of output)`]] as Row[])
-      : []),
-    ["input", `${n0(t.input)} fresh`],
-    ["", `${n0(t.cacheRead)} cache read`],
-    ...(t.cacheWrite > 0 ? ([["", `${n0(t.cacheWrite)} cache write`]] as Row[]) : []),
-  ]
-  if (d.context) {
-    rows.push([
-      "context",
-      d.context.limit ? `${n0(d.context.used)} / ${n0(d.context.limit)}  ${Math.round((d.context.used / d.context.limit) * 100)}%` : n0(d.context.used),
-    ])
-  }
-  if (d.cost !== undefined) rows.push(["cost", `$${d.cost.toFixed(4)}`])
-  out.push({ title: "Tokens", rows })
-  if (d.engineRows.length > 0) {
-    const perStep = (d.stepEngine ?? []).flatMap((e, i) =>
-      e && (e.decodeTokS !== undefined || e.prefillTokS !== undefined)
-        ? [
-            `step ${String(i + 1).padEnd(2)} ${e.decodeTokS !== undefined ? `${e.decodeTokS.toFixed(1)} tok/s` : ""}${
-              e.prefillTokS !== undefined ? `  prefill ${Math.round(e.prefillTokS)} tok/s` : ""
-            }`,
-          ]
-        : []
-    )
-    const lines = [
-      ...(perStep.length > 1 ? ["", "per step", ...perStep] : []),
-      ...(d.compactionEngine ? ["", "compaction, taken out of the above", ...d.compactionEngine] : []),
-    ]
-    out.push({ title: `${ENGINE_MARK} Engine · ${d.engine}`, rows: d.engineRows, lines: lines.length > 0 ? lines : undefined })
-  } else if (d.engineNote && d.engineNote.length > 0) {
-    // The engine reported; its figures were not used. Say which and why,
-    // rather than reading as though it had been silent.
-    out.push({ title: `Engine · ${d.engine}`, lines: [`${d.engine}'s figures were left out:`, ...d.engineNote] })
-  } else {
-    out.push({ title: `Engine · ${d.engine}`, lines: ["no engine telemetry for this provider"] })
-  }
-  if (d.subagents) {
-    out.push({
-      title: "Sub-agents",
-      rows: [
-        ["count", String(d.subagents.count)],
-        ["tokens", n0(d.subagents.tokens)],
-        ["time", secs(d.subagents.spanS)],
-        ...(d.subagents.cost !== undefined ? ([["cost", `$${d.subagents.cost.toFixed(4)}`]] as Row[]) : []),
-      ],
-    })
-  }
-  return out
 }

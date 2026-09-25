@@ -1,3 +1,18 @@
+## [Unreleased]
+### Changed
+- The details dialog is one column with three tabs -- Turn, Session and
+  History -- switched with `tab`, instead of two side-by-side columns. It is
+  as tall as its content (up to most of the screen) rather than always
+  near full height, a fixed 72 cells wide with even padding, and uses
+  section rules, bars for shares, and bold values beside dim labels.
+- The Turn tab adds a timeline: each step's wait, generation and tools on
+  one time scale. Its steps table shows the engine's own per-step rate
+  beside OpenCode's where the engine is read per step.
+- `ctrl+shift+h` opens the dialog's History tab instead of the history
+  panel. The tab lays each turn out in fixed columns, so a long row no
+  longer wraps; `s` switches between this session and every session.
+- `/headsup session` and `/headsup history` open the dialog on those tabs.
+
 ## [0.4.0] – 2026-09-25
 ### Added
 - A **details dialog**, opened by `details ›` under the sidebar boxes,
