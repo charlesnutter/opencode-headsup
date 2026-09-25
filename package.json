@@ -30,6 +30,7 @@
   "files": [
     "tui.tsx",
     "detail.ts",
+    "dialog.ts",
     "counters.ts",
     "format.ts",
     "http.ts",

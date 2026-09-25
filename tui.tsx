@@ -33,9 +33,25 @@ import { universalView, turnRate, turnSteps, turnUserAt, lastModel, aggregateTur
 import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
-import { summariseSession, sessionView, sessionSections, rollupSubagents, subagentRows } from "./session"
+import { summariseSession, sessionView, sessionFigures, rollupSubagents, subagentRows } from "./session"
 import { shiftBaseline, counterDelta } from "./counters"
-import { buildTurnDetail, turnSections, ENGINE_MARK, SUBAGENT_TOOLS, type TurnDetail, type Section } from "./detail"
+import { buildTurnDetail, SUBAGENT_TOOLS, type TurnDetail } from "./detail"
+import {
+  turnLines,
+  sessionLines,
+  historyTabLines,
+  tabsLine,
+  footLine,
+  dur,
+  TABS,
+  CONTENT_WIDTH,
+  spaced,
+  type Spacing,
+  type Line,
+  type Style,
+  type Tab,
+  type Scope,
+} from "./dialog"
 
 import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -162,6 +178,9 @@ interface UiState {
 }
 
 // ---- entry ------------------------------------------------------------------
+
+/** Blank rows in the details dialog: "roomy", as the user laid it out (see dialog.ts). */
+const DIALOG_SPACING: Spacing = "roomy"
 
 /** Identifies this plugin's panel among any others contributed to the slot. */
 const PANEL_NAME = "headsup.history"
@@ -310,123 +329,272 @@ export default Plugin.define({
     // built: ui.dialog.show draws at xlarge, 116 cells on a 214-column
     // terminal; a scrollbox inside scrolls by wheel and by keys; a keymap
     // layer inside the dialog takes tab without the prompt seeing it.
-    const [details, setDetails] = ctx.storage.memory<{ tab: "turn" | "session"; cols: number; rows: number }>(
+    const [details, setDetails] = ctx.storage.memory<{ tab: Tab; scope: Scope; cols: number; rows: number; w: number }>(
       "details",
-      { initial: { tab: "turn", cols: 0, rows: 0 } }
+      { initial: { tab: "turn", scope: "session", cols: 0, rows: 0, w: CONTENT_WIDTH } }
     )
-    /** Below this many terminal columns the two columns are one, switched by tab. */
-    const TWO_COLUMN_MIN = 110
-    const DETAIL_COL = 46
+    // The dialog's colours, from the theme's hue scales (measured on 2.0.12:
+    // hue.{gray,blue,cyan,purple,orange,red}.{100..900}), each with a fallback.
+    // Each hue's shade is picked by contrast against the theme's background,
+    // not by a fixed step: a fixed 500 came out dark navy on the dark theme
+    // and the rules' gray matched the dialog's background (both measured).
+    type Rgb = { toInts?: () => [number, number, number, number] }
+    const lum = (c: Rgb): number | undefined => {
+      const i = c.toInts?.()
+      if (!i) return undefined
+      const ch = (v: number): number => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * ch(i[0]) + 0.7152 * ch(i[1]) + 0.0722 * ch(i[2])
+    }
+    const shade = (hue: string, contrast: number): Color | undefined => {
+      const bg = themeColor("background.raised.high", "background.base") as Rgb | undefined
+      const lb = bg ? lum(bg) : undefined
+      let best: { c: unknown; d: number } | undefined
+      for (const step of [100, 200, 300, 400, 500, 600, 700, 800, 900]) {
+        const c = themeColor(`hue.${hue}.${step}`) as Rgb | undefined
+        const l = c ? lum(c) : undefined
+        if (c === undefined || l === undefined || lb === undefined) continue
+        const ratio = (Math.max(l, lb) + 0.05) / (Math.min(l, lb) + 0.05)
+        const d = Math.abs(ratio - contrast)
+        if (!best || d < best.d) best = { c, d }
+      }
+      return best?.c as Color | undefined
+    }
+    // On a dark theme the dialog uses the approved mockup's colours exactly;
+    // on a light one, shades picked from the theme by contrast (below).
+    const MOCKUP: Partial<Record<Style, string>> = {
+      dim: "#8a8a8a",
+      wait: "#5a5a5a",
+      gen: "#6b9bff",
+      accent: "#6b9bff",
+      tool: "#5fb3a8",
+      sub: "#b48ae0",
+      comp: "#8a8a8a",
+      engine: "#e0a95a",
+      rule: "#4a4a4a",
+    }
+    const palette = new Map<Style, Color | undefined>()
+    const styleColor = (st: Style): Color | undefined => {
+      if (ctx.themeMode === "dark" && MOCKUP[st]) return MOCKUP[st] as unknown as Color
+      if (palette.has(st)) return palette.get(st)
+      let c: Color | undefined
+      switch (st) {
+        case "dim":
+          c = subduedColor()
+          break
+        case "wait":
+          c = shade("gray", 3) ?? subduedColor()
+          break
+        case "gen":
+        case "accent":
+          c = shade("blue", 6) ?? (themeColor("text.action.primary") as Color | undefined)
+          break
+        case "tool":
+          c = shade("cyan", 6) ?? shade("green", 6)
+          break
+        case "sub":
+          c = shade("purple", 6)
+          break
+        case "comp":
+          c = shade("red", 5)
+          break
+        case "engine":
+          c = shade("orange", 7) ?? shade("yellow", 7)
+          break
+        case "rule":
+          c = shade("gray", 1.8) ?? (themeColor("border.base") as Color | undefined)
+          break
+      }
+      palette.set(st, c)
+      return c
+    }
+    /** One line of the dialog: a `<text>` with a span per segment. */
+    const drawLine = (line: Line) => (
+      <text selectable={false}>
+        {line.length === 0
+          ? " "
+          : line.map(([t, st]) =>
+              st === "bold" ? (
+                <b>{t}</b>
+              ) : st === "tab" ? (
+                <span
+                  style={
+                    ctx.themeMode === "dark"
+                      ? { fg: "#181818" as unknown as Color, bg: "#eeeeee" as unknown as Color }
+                      : { fg: themeColor("background.base") as Color | undefined, bg: themeColor("text.base") as Color | undefined }
+                  }
+                >
+                  <b>{t}</b>
+                </span>
+              ) : (
+                <span style={{ fg: styleColor(st) }}>{t}</span>
+              )
+            )}
+      </text>
+    )
     // Whether our dialog is the one showing. The keybind toggles it: pressed
     // again while it was open, it re-opened the dialog over itself (a blink).
     let detailsOpen = false
-    const openDetails = (sessionID: string | undefined): void => {
+    /**
+     * Opens the dialog on `tab`. Asked again for the tab already showing, it
+     * closes; asked for another tab while open, it switches.
+     */
+    const openDetails = (sessionID: string | undefined, tab: Tab = "turn"): void => {
       if (detailsOpen) {
-        dbg("details: toggle closed")
-        ctx.ui.dialog.clear()
+        if (details.tab === tab) {
+          dbg("details: toggle closed")
+          ctx.ui.dialog.clear()
+        } else {
+          setDetails((d) => {
+            d.tab = tab
+          })
+        }
         return
       }
-      dbg(`details: open for ${sessionID ?? "no session"}; terminal ${ctx.renderer.terminalWidth}x${ctx.renderer.terminalHeight}`)
-      const stored = sessionID ? lineFor(panel, sessionID) : PLACEHOLDER
-      const turnView: TurnView =
-        stored === PLACEHOLDER ? { engine: "last turn", rows: [], notes: ["no turn yet"] } : decodeView(stored)
-      const summary = summariseSession(history.turns, sessionID)
-      const sessView: TurnView = summary ? sessionView(summary) : { engine: "Session", rows: [], notes: ["no turns yet"] }
-      let scroll: { scrollBy?: (d: number) => void; width?: number; height?: number; focus?: () => void } | undefined
-      let root: { width?: number; height?: number } | undefined
-      // The terminal's size, kept current while the dialog is open, so a
-      // resize re-lays it out (one column or two, and the body's height).
-      const sized = (cols: number, rows: number): void => {
+      dbg(`details: open ${tab} for ${sessionID ?? "no session"}; terminal ${ctx.renderer.terminalWidth}x${ctx.renderer.terminalHeight}`)
+      setDetails((d) => {
+        d.tab = tab
+        d.cols = ctx.renderer.terminalWidth
+        d.rows = ctx.renderer.terminalHeight
+      })
+      // A resize re-lays the dialog out: its height follows the terminal's.
+      const onResize = (cols: number, rows: number): void => {
         setDetails((d) => {
           d.cols = cols
           d.rows = rows
         })
       }
-      sized(ctx.renderer.terminalWidth, ctx.renderer.terminalHeight)
-      const onResize = (cols: number, rows: number): void => {
-        dbg(`details: resize ${cols}x${rows}`)
-        sized(cols, rows)
-      }
       ctx.renderer.on("resize", onResize)
+      let scroll: { scrollBy?: (d: number) => void; focus?: () => void; width?: number; height?: number } | undefined
+      let root: { width?: number; height?: number } | undefined
       detailsOpen = true
       ctx.ui.dialog.show(
         () => {
-          const subdued = subduedColor()
-          const wide = (): boolean => details.cols >= TWO_COLUMN_MIN
-          // Title, blank, blank, footer, the dialog's own padding, and room
-          // above and below it on screen.
-          const pageRows = (): number => Math.max(4, details.rows - 16)
+          // The current tab's lines, reactive on the tab, the scope and the
+          // stored turn and history.
+          const lines = (): Line[] => {
+            const raw =
+              details.tab === "turn"
+                ? turnLines(sessionID ? turnDetail.bySession[sessionID] : undefined, details.w)
+                : details.tab === "session"
+                  ? sessionLines(sessionFigures(history.turns, sessionID), details.w)
+                  : historyTabLines(history.turns, sessionID, details.scope, details.w)
+            return spaced(raw, DIALOG_SPACING)
+          }
+          const note = (): string => {
+            if (details.tab === "turn") {
+              const d = sessionID ? turnDetail.bySession[sessionID] : undefined
+              return d ? `${d.engine}${d.totalS !== undefined ? ` · ${dur(d.totalS)}` : ""}` : ""
+            }
+            if (details.tab === "session") {
+              const f = sessionFigures(history.turns, sessionID)
+              return f ? `${f.turns} ${f.turns === 1 ? "turn" : "turns"} · ${dur(f.elapsedS)}` : ""
+            }
+            return details.scope === "all" ? "all sessions" : "this session"
+          }
+          // Sized to the content, up to 70% of the screen less the tabs and
+          // footer; it scrolls only beyond that.
+          // Less the tabs, footer, their gaps, the panel's padding and the ring.
+          const bodyRows = (): number => Math.max(4, Math.min(lines().length, Math.floor(details.rows * 0.75) - 9))
           ctx.keymap.layer(() => ({
             mode: "global",
             priority: 100,
             commands: [
               {
-                title: "Switch turn / session",
+                title: "Next view",
                 bind: "tab",
-                run: () => {
+                run: () =>
                   setDetails((d) => {
-                    d.tab = d.tab === "turn" ? "session" : "turn"
+                    d.tab = TABS[(TABS.indexOf(d.tab) + 1) % TABS.length] as Tab
+                  }),
+              },
+              {
+                title: "Previous view",
+                bind: "shift+tab",
+                run: () =>
+                  setDetails((d) => {
+                    d.tab = TABS[(TABS.indexOf(d.tab) + TABS.length - 1) % TABS.length] as Tab
+                  }),
+              },
+              {
+                title: "This session / all sessions",
+                bind: "s",
+                run: () => {
+                  if (details.tab !== "history") return false
+                  setDetails((d) => {
+                    d.scope = d.scope === "session" ? "all" : "session"
                   })
-                  dbg(`details: tab -> ${details.tab}`)
                 },
               },
               { title: "Scroll down", bind: "down", run: () => scroll?.scrollBy?.(1) },
               { title: "Scroll up", bind: "up", run: () => scroll?.scrollBy?.(-1) },
-              { title: "Page down", bind: "pagedown", run: () => scroll?.scrollBy?.(pageRows()) },
-              { title: "Page up", bind: "pageup", run: () => scroll?.scrollBy?.(-pageRows()) },
+              { title: "Page down", bind: "pagedown", run: () => scroll?.scrollBy?.(bodyRows()) },
+              { title: "Page up", bind: "pageup", run: () => scroll?.scrollBy?.(-bodyRows()) },
             ],
           }))
-          const column = (title: string, sections: Section[]) => (
-            <box flexDirection="column" width={DETAIL_COL}>
-              <text selectable={false}>
-                <b>{title}</b>
-              </text>
-              {sections.map((sec) => (
-                <box flexDirection="column" marginTop={1}>
-                  <text selectable={false}>
-                    <b>{sec.title}</b>
-                  </text>
-                  {(sec.rows ?? []).map(([label, value]) => (
-                    <text selectable={false}>
-                      <span style={{ fg: subdued }}>{label.padEnd(LABEL_WIDTH)}</span>
-                      {value}
-                    </text>
-                  ))}
-                  {(sec.lines ?? []).map((l, i) => (
-                    <text selectable={false} fg={i === 0 && sec.title.startsWith("Steps") ? subdued : undefined}>
-                      {l || " "}
-                    </text>
-                  ))}
-                </box>
-              ))}
-            </box>
-          )
-          const detail = sessionID ? turnDetail.bySession[sessionID] : undefined
-          const turnTitle = `Last turn · ${detail?.engine ?? turnView.engine}${detail?.outcome ? ` · ${detail.outcome}` : ""}`
-          const turnCol = (): Section[] =>
-            detail ? turnSections(detail) : [{ title: "No turn yet in this run", lines: ["Details start with the next turn."] }]
-          const sessCol = (): Section[] => sessionSections(history.turns, sessionID)
-          setTimeout(() => {
-            dbg(
-              `details: wide ${wide()}; dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; ` +
-                `scrollbox ${scroll?.width ?? "?"}x${scroll?.height ?? "?"}`
-            )
-          }, 300)
+          // The content takes the dialog's measured width, less its padding:
+          // `large` measured 88 cells on a 241-column terminal, and a fixed
+          // 72-cell layout left an empty strip on the right. Narrower than
+          // the layout needs, the dialog goes to `xlarge` and is measured again.
+          const fit = (tries: number): void => {
+            setTimeout(() => {
+              // Less the ring (2 x 2), the panel's padding (2 x 2) and the
+              // scrollbar with a gap (2), always: reserved only when the
+              // content scrolled, the width was worked out before the
+              // scrollbar appeared, so full-width lines ran 2 cells long and
+              // wrapped onto a second, blank-looking row (measured).
+              const inner = root?.width !== undefined ? root.width - 10 : undefined
+              if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
+                ctx.ui.dialog.set({ size: "xlarge", centered: true })
+                fit(tries - 1)
+                return
+              }
+              if (inner !== undefined) {
+                setDetails((d) => {
+                  // The whole of the dialog's width: a cap left a wide empty
+                  // strip on the right of an xlarge dialog (measured).
+                  d.w = Math.max(CONTENT_WIDTH, Math.min(160, inner))
+                })
+              }
+              dbg(`details: dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; content ${details.w} wide; ${lines().length} lines`)
+              if (HUD_DEBUG) {
+                const hex = (c: unknown): string => {
+                  const i = (c as { toInts?: () => number[] } | undefined)?.toInts?.()
+                  return i ? `#${i.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")}` : "none"
+                }
+                const picks = (["gen", "wait", "tool", "sub", "engine", "rule"] as Style[]).map((st) => `${st} ${hex(styleColor(st))}`)
+                dbg(`details: colours ${picks.join(", ")}; background ${hex(themeColor("background.raised.high", "background.base"))}`)
+              }
+            }, 60)
+          }
+          fit(1)
+          // Two tones: an outer ring in the dialog's own colour (its top row is
+          // the dialog's padding; the plugin adds the sides and bottom), round
+          // a lighter panel with padding of its own. The ring reads as a thick
+          // dark border, as the sidebar boxes do (chosen from the mockup).
+          const panel = (): Color | undefined =>
+            ctx.themeMode === "dark"
+              ? ("#1f1f1f" as unknown as Color)
+              : (themeColor("background.raised.high", "background.surface.offset") as Color | undefined)
           return (
             <box
               flexDirection="column"
               paddingLeft={2}
               paddingRight={2}
-              paddingTop={1}
               paddingBottom={1}
               ref={(r: unknown) => (root = r as typeof root)}
             >
-              <text selectable={false}>
-                <b>Heads Up</b>
-                <span style={{ fg: subdued }}>
-                  {wide() ? "" : `  ·  ${details.tab === "turn" ? "[turn] session" : "turn [session]"}  tab switches`}
-                </span>
-              </text>
+             <box
+              flexDirection="column"
+              backgroundColor={panel()}
+              paddingLeft={2}
+              paddingRight={2}
+              paddingTop={1}
+              paddingBottom={1}
+             >
+              {drawLine(tabsLine(details.tab, note(), details.w))}
               <text selectable={false}> </text>
               <scrollbox
                 ref={(r: unknown) => {
@@ -434,23 +602,13 @@ export default Plugin.define({
                   scroll?.focus?.()
                 }}
                 scrollY
-                height={pageRows()}
+                height={bodyRows()}
               >
-                {wide() ? (
-                  <box flexDirection="row" gap={4}>
-                    {column(turnTitle, turnCol())}
-                    {column(sessView.engine, sessCol())}
-                  </box>
-                ) : details.tab === "turn" ? (
-                  column(turnTitle, turnCol())
-                ) : (
-                  column(sessView.engine, sessCol())
-                )}
+                <box flexDirection="column">{lines().map((l) => drawLine(l))}</box>
               </scrollbox>
               <text selectable={false}> </text>
-              <text selectable={false} fg={subdued}>
-                {`${ENGINE_MARK} measured by the engine; the rest is OpenCode's  ·  ↑↓ pgup pgdn  ·  esc`}
-              </text>
+              {drawLine(footLine(details.tab, details.w))}
+             </box>
             </box>
           )
         },
@@ -460,6 +618,8 @@ export default Plugin.define({
           dbg("details: closed")
         }
       )
+      // xlarge: large (88 cells) left too little room once the scrollbar
+      // and the two-tone ring were in (the user's call). The content fills it.
       ctx.ui.dialog.set({ size: "xlarge", centered: true })
     }
     const currentSession = (): string | undefined => {
@@ -1297,7 +1457,8 @@ export default Plugin.define({
         cacheWrite: detail?.tokens.cacheWrite || undefined,
         toolsS: detail?.time?.tools,
         compactionS: detail?.time?.compaction || undefined,
-        tools: detail ? toolsByName(detail) : undefined,
+        // {} when the turn used no tool, so "none" can be told from "not recorded".
+        tools: detail ? (toolsByName(detail) ?? {}) : undefined,
         retryReasons: detail?.steps.flatMap((st) => (st.retryReason ? [st.retryReason] : [])),
         skip: enriched
           ? undefined
@@ -1700,9 +1861,14 @@ export default Plugin.define({
           group: "opencode-headsup",
           bind: "ctrl+shift+d",
           palette: true,
-          slash: { name: "headsup" },
-          run: () => {
-            openDetails(currentSession())
+          // `/headsup`, `/headsup session`, `/headsup history`: the rest of the
+          // line picks the tab (arguments: true passes it through).
+          slash: { name: "headsup", arguments: true },
+          run: (input) => {
+            const arg = (input ?? "").trim().toLowerCase()
+            const tab: Tab = arg.startsWith("s") ? "session" : arg.startsWith("h") ? "history" : "turn"
+            if (arg) dbg(`details: /headsup ${arg} -> ${tab}`)
+            openDetails(currentSession(), tab)
           },
         },
         {
@@ -1712,14 +1878,12 @@ export default Plugin.define({
           group: "opencode-headsup",
           bind: "ctrl+shift+h",
           palette: true,
+          // The history panel is retired in favour of the dialog's History
+          // tab, which knows its width and never wraps a row. The panel's
+          // code stays (see the session.panel slot) for one release, in case
+          // the tab is missing something; this key now opens the tab.
           run: () => {
-            // A snapshot read, not a reactive one: this decides once.
-            // `current()` is per-plugin ("This plugin's active panel"), so
-            // it never sees another plugin's panel.
-            const open = ctx.ui.panel.current()?.name === PANEL_NAME
-            dbg(`panel toggle -> ${open ? "close" : "open"}`)
-            if (open) ctx.ui.panel.close()
-            else ctx.ui.panel.open(PANEL_NAME)
+            openDetails(currentSession(), "history")
           },
         },
       ],
@@ -1774,7 +1938,7 @@ export default Plugin.define({
                     took the release as a click outside and closed it at once
                     (measured: open and close 1ms apart). */}
                 <text selectable={false} marginTop={1} marginLeft={3} onMouseUp={() => openDetails(input.sessionID)}>
-                  <span style={{ fg: themeColor("text.action.base", "text.action", "primary") as Color | undefined }}>details ›</span>
+                  <span style={{ fg: themeColor("text.action.primary", "hue.blue.500") as Color | undefined }}>details ›</span>
                 </text>
               </box>
             )

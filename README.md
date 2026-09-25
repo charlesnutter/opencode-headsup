@@ -70,8 +70,10 @@ Equivalent, if you keep your config in version control:
 | Key | Does |
 | --- | --- |
 | `ctrl+shift+m` | Collapse/expand the last-turn box. Clicking its heading does the same. |
-| `ctrl+shift+h` | Open/close the per-turn history panel. |
-| `ctrl+shift+d` | Open/close the details dialog. So do `/headsup` and clicking `details ›`. |
+| `ctrl+shift+d` | Open/close the details dialog on the Turn tab. So do `/headsup` and clicking `details ›`. |
+| `ctrl+shift+h` | Open the details dialog on the History tab. |
+
+`/headsup session` and `/headsup history` open the dialog on those tabs.
 
 All three are registered with stable command ids (`headsup.toggle`,
 `headsup.panel`, `headsup.details`), so they can be remapped from your own
@@ -86,15 +88,17 @@ one figure rather than becoming a bare label:
 
 ## Details
 
-A dialog with the last turn on the left and the session on the right. On a
-terminal narrower than 110 columns it shows one at a time; `tab` switches.
-It scrolls with the wheel, `↑` `↓` and page up/down; `esc` closes it.
+A dialog with three tabs -- **Turn**, **Session** and **History** --
+switched with `tab` (`shift+tab` goes back). It is as tall as its content,
+up to most of the screen, and scrolls beyond that with the wheel, `↑` `↓`
+and page up/down; `esc` closes it.
 
-**Last turn**
-- **Where the time went**, in seconds and as shares that add up to the
-  turn's total: waiting for the first token, generating, tools, sub-agents,
-  compaction, and the rest. A moment is counted once, so a tool running
-  beside a sub-agent is not counted twice.
+**Turn**
+- **Where the time went**, as a bar and in seconds and shares that add up
+  to the turn's total: waiting for the first token, generating, tools,
+  sub-agents, compaction, and the rest. A moment is counted once, so a tool
+  running beside a sub-agent is not counted twice.
+- **Timeline**: each step's wait, generation and tools on one time scale.
 - **Steps**: tokens, tok/s and time to first token per step, each tool call
   and how long it ran, retries, and a step that waited on a compaction.
 - **Tokens**: output, reasoning, fresh input, cache read and cache write;
@@ -110,10 +114,17 @@ It scrolls with the wheel, `↑` `↓` and page up/down; `esc` closes it.
 - Speed as an average and a spread (min, median, p90, max), a trend, and
   time to first token (median, p90, max).
 - Where the time went, in seconds, across the session.
-- Tools by time, retries by reason, tokens in all five kinds.
+- Tools by time as bars, retries by reason, tokens in all five kinds.
 - **Coverage**: how many turns had the engine's own figures, and why the
   rest did not (first turn, compaction, overlapping requests, no engine
   telemetry, ...).
+
+**History**
+- One row per turn in fixed columns, never wrapped: time, tok/s, tokens,
+  time to first token, total, tool calls, and `◆` where the engine's own
+  figures were used. `s` switches between this session and every session,
+  where a model column appears. Cost and cache columns appear when some
+  turn has them.
 
 Everything unmarked is OpenCode's own data; `◆` marks the engine's.
 

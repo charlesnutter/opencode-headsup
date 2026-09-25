@@ -1,7 +1,7 @@
 // Validates detail.ts -- a turn's full detail, for the details dialog.
 // Run with: bun test/detail.test.mjs
 import { strict as assert } from "node:assert"
-import { buildTurnDetail, unionSeconds, percents, turnSections } from "../detail.ts"
+import { buildTurnDetail, unionSeconds, percents } from "../detail.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -86,50 +86,6 @@ test("no total, no split: nothing is made up", () => {
   assert.equal(buildTurnDetail(steps, marks, { ...base, totalS: undefined }).time, undefined)
 })
 
-test("sections fit a 46-cell column", () => {
-  const d = buildTurnDetail(steps, marks, base)
-  for (const s of turnSections(d)) {
-    for (const [l, v] of s.rows ?? []) assert.ok(12 + v.length <= 46, `${l}: ${v}`)
-    for (const line of s.lines ?? []) assert.ok(line.length <= 46, line)
-  }
-})
-
-test("the steps table lists each tool call on its own line", () => {
-  const steps_ = turnSections(buildTurnDetail(steps, marks, base)).find((s) => s.title.startsWith("Steps"))
-  assert.ok(steps_.lines.some((l) => l.includes("task") && l.includes("10.00s")), steps_.lines.join("\n"))
-  assert.ok(steps_.lines.some((l) => l.includes("— stop")), steps_.lines.join("\n"))
-  assert.ok(steps_.lines.some((l) => l.includes("1 retry")), steps_.lines.join("\n"))
-})
-
-test("the engine section is marked, and says why when there are no engine figures", () => {
-  const withEngine = turnSections(buildTurnDetail(steps, marks, { ...base, engineRows: [["speed", "36.1 tok/s"]] }))
-  assert.ok(withEngine.some((s) => s.title === "◆ Engine · MTPLX"), withEngine.map((s) => s.title).join(", "))
-  const skipped = turnSections(buildTurnDetail(steps, marks, { ...base, engineNote: ["engine data skipped:", "overlapping requests"] }))
-  const e = skipped.find((s) => s.title === "Engine · MTPLX")
-  assert.deepEqual(e.lines, ["MTPLX's figures were left out:", "engine data skipped:", "overlapping requests"])
-  const none = turnSections(buildTurnDetail(steps, marks, { ...base, engine: "openai" })).find((s) => s.title === "Engine · openai")
-  assert.deepEqual(none.lines, ["no engine telemetry for this provider"])
-})
-
-test("per-step engine rates are listed when the engine read each step", () => {
-  const d = buildTurnDetail(steps, marks, {
-    ...base,
-    engineRows: [["speed", "36.1 tok/s"]],
-    stepEngine: [{ decodeTokS: 35.2, prefillTokS: 452 }, { decodeTokS: 36.9 }, undefined],
-  })
-  const e = turnSections(d).find((s) => s.title.startsWith("◆ Engine"))
-  assert.ok(e.lines.includes("step 1  35.2 tok/s  prefill 452 tok/s"), e.lines.join("\n"))
-  assert.ok(e.lines.includes("step 2  36.9 tok/s"), e.lines.join("\n"))
-})
-
-test("retry reasons are listed in full, wrapped to the column", () => {
-  const long = "Rate limited by the provider; retrying after the backoff window elapses"
-  const retried = [steps[0], { ...steps[1], retry: { attempt: 2, at: 0, error: { type: "x", message: long } } }, steps[2]]
-  const sec = turnSections(buildTurnDetail(retried, marks, base)).find((s) => s.title === "Retries and errors")
-  assert.equal(sec.lines.join(" "), `step 2: ${long}`)
-  sec.lines.forEach((l) => assert.ok(l.length <= 46, l))
-})
-
 test("a compaction gets its own share, and the step it delayed says so", () => {
   // OpenCode compacts from 17.5s to 18.4s; step c was created at 18s and
   // waited until 18.5s for its first token, 0.4s of it on the compaction.
@@ -139,8 +95,6 @@ test("a compaction gets its own share, and the step it delayed says so", () => {
   const sum = d.time.waiting + d.time.generating + d.time.tools + d.time.subagents + d.time.compaction + d.time.other
   assert.ok(Math.abs(sum - 20) < 1e-9, String(sum))
   assert.ok(Math.abs(d.steps[2].compactionS - 0.4) < 1e-9, String(d.steps[2].compactionS))
-  const lines = turnSections(d).find((s) => s.title.startsWith("Steps")).lines
-  assert.ok(lines.some((l) => l.includes("waited on compaction 0.40s")), lines.join("\n"))
 })
 
 console.log(`\n${passed} passed`)
