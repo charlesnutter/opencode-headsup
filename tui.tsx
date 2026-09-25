@@ -29,7 +29,7 @@ import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
 import type { HttpOptions } from "./http"
-import { universalView, turnRate, turnSteps, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
+import { universalView, turnRate, turnSteps, lastModel, aggregateTurn, type Turn, type Display, DEFAULT_DISPLAY } from "./universal"
 import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
@@ -322,6 +322,9 @@ export default Plugin.define({
     const stepProvider = new Map<string, string>()
     const stepModel = new Map<string, string>()
     const stepReads = new Map<string, Promise<unknown>>()
+    // Per session: a model selected in it, for priming a session whose
+    // messages don't name one yet.
+    const selectedModel = new Map<string, { providerID: string; id: string }>()
     const bound = <V,>(m: Map<string, V>): void => {
       if (m.size > 64) {
         const oldest = m.keys().next().value
@@ -634,20 +637,114 @@ export default Plugin.define({
           return mlxServeView(t, hostFigures)
         }
 
+        default: {
+          const p = promTarget(provider)
+          return p ? prom(p.id, p.spec, p.url, p.label) : null // no adapter: Tier 1 handles it
+        }
+      }
+    }
+
+    /** The Prometheus engines: baseline key, metric names, URL and label. */
+    function promTarget(provider: string): { id: string; spec: PromSpec; url: string; label: string } | undefined {
+      switch (provider) {
         case "vllm":
-          return prom("vllm", VLLM_SPEC, cfg.vllmBase, "vLLM")
+          return { id: "vllm", spec: VLLM_SPEC, url: cfg.vllmBase, label: "vLLM" }
         case "sglang":
-          return prom("sglang", SGLANG_SPEC, cfg.sglangBase, "SGLang")
+          return { id: "sglang", spec: SGLANG_SPEC, url: cfg.sglangBase, label: "SGLang" }
         case "vllmmlx":
         case "vllm-mlx":
-          return prom("vllmmlx", VLLM_MLX_SPEC, cfg.vllmMlxBase, "vllm-mlx")
+          return { id: "vllmmlx", spec: VLLM_MLX_SPEC, url: cfg.vllmMlxBase, label: "vllm-mlx" }
         case "aphrodite":
-          return prom("aphrodite", APHRODITE_SPEC, cfg.aphroditeBase, "Aphrodite")
+          return { id: "aphrodite", spec: APHRODITE_SPEC, url: cfg.aphroditeBase, label: "Aphrodite" }
         case "lmdeploy":
-          return prom("lmdeploy", LMDEPLOY_SPEC, cfg.lmdeployBase, "LMDeploy")
-
+          return { id: "lmdeploy", spec: LMDEPLOY_SPEC, url: cfg.lmdeployBase, label: "LMDeploy" }
         default:
-          return null // no adapter: Tier 1 handles it
+          return undefined
+      }
+    }
+
+    /**
+     * An engine's name as its own view heads it, so a turn that falls back to
+     * OpenCode's figures keeps the same heading (`vllm-mlx`, not `vllmmlx`).
+     * Providers with no adapter keep their id.
+     */
+    function engineLabel(provider: string): string {
+      const known: Record<string, string> = {
+        mtplx: "MTPLX",
+        omlx: "oMLX",
+        llamacpp: "llama.cpp",
+        llamafile: "llamafile",
+        splash: "Splash",
+        koboldcpp: "KoboldCpp",
+        kobold: "KoboldCpp",
+        mlxserve: "mlx-serve",
+        "mlx-serve": "mlx-serve",
+      }
+      return promTarget(provider)?.label ?? known[provider] ?? provider
+    }
+
+    // ---- baseline priming ---------------------------------------------------
+    // A counter-difference engine is read at each turn's end, and that reading
+    // is the next turn's baseline -- so the first turn after launch had none
+    // and showed "engine telemetry from the next turn". Priming reads the one
+    // engine a turn is about to use, when the turn starts, only if it has no
+    // baseline yet: one localhost request per engine per run, never a sweep
+    // of every configured engine. The engine counts nothing until prefill is
+    // done, so the read should land first; if it lands late, the turn's token
+    // check declines the window, which is no worse than having no baseline.
+    const priming = new Set<string>()
+    async function prime(provider: string): Promise<void> {
+      if (priming.has(provider)) return
+      const http: HttpOptions = { signal: life.signal }
+      const t0 = Date.now()
+      const done = (what: string): void => dbg(`prime ${provider}: ${what} after ${Date.now() - t0}ms`)
+      priming.add(provider)
+      try {
+        const p = promTarget(provider)
+        if (p) {
+          if (base.prom[p.id]) return
+          const now = await fetchPromSample(p.url, p.spec, http)
+          if (!now) return done("no reading")
+          // A turn's end may have set one meanwhile; that one is newer.
+          setBase((d) => {
+            if (!d.prom[p.id]) d.prom[p.id] = now
+          })
+          return done("baseline set")
+        }
+        switch (provider) {
+          case "llamacpp":
+          case "llamafile": {
+            if (base.llamacpp[provider]) return
+            const now = await fetchLlamaCppCounters(provider === "llamacpp" ? cfg.llamacppBase : cfg.llamafileBase, http)
+            if (!now) return done("no reading")
+            setBase((d) => {
+              if (!d.llamacpp[provider]) d.llamacpp[provider] = now
+            })
+            return done("baseline set")
+          }
+          case "splash": {
+            if (base.splash[cfg.splashBase]) return
+            const now = await fetchSplashSample(cfg.splashBase, http)
+            if (!now) return done("no reading")
+            setBase((d) => {
+              if (!d.splash[cfg.splashBase]) d.splash[cfg.splashBase] = now
+            })
+            return done("baseline set")
+          }
+          case "omlx": {
+            if (base.omlx) return
+            const now = await fetchOmlxSample(cfg.omlxBase, cfg.omlxKey, http)
+            if (!now) return done("no reading")
+            setBase((d) => {
+              if (!d.omlx) d.omlx = now
+            })
+            return done("baseline set")
+          }
+        }
+      } catch (e: unknown) {
+        dbg(`prime ${provider} threw: ${String(e)}`)
+      } finally {
+        priming.delete(provider)
       }
     }
 
@@ -719,7 +816,7 @@ export default Plugin.define({
         // A model or provider switch replaces this session's line rather than
         // blending two engines' figures into one reading. Per session, so a
         // different model in another tab is not a switch here.
-        show(encodeView({ engine: provider, rows: [], notes: ["…"] }), sessionID, key)
+        show(encodeView({ engine: engineLabel(provider), rows: [], notes: ["…"] }), sessionID, key)
       }
 
       // One signal for every fetch this turn. Each request still gets its own
@@ -777,7 +874,7 @@ export default Plugin.define({
       const enriched = line !== null
       if (!line) {
         line = universalView(
-          provider,
+          engineLabel(provider),
           info,
           turn,
           cfg.display,
@@ -894,7 +991,23 @@ export default Plugin.define({
       off.push(
         ctx.data.on("session.execution.started", (evt) => {
           const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
-          if (typeof sid === "string") execStart.set(sid, Date.now())
+          if (typeof sid !== "string") return
+          execStart.set(sid, Date.now())
+          // The engine this turn will use: the session's last model, or one
+          // just selected. A new session on the default model has neither,
+          // and its first turn goes unprimed, as before.
+          const m = selectedModel.get(sid) ?? lastModel(ctx.data.session.message.list(sid) ?? [])
+          dbg(`prime lookup ${sid}: ${m ? `${m.providerID}/${m.id}` : "no model known"}`)
+          if (m) void prime(m.providerID)
+        })
+      )
+      off.push(
+        ctx.data.on("session.model.selected", (evt) => {
+          const d = (evt as { data?: { sessionID?: string; model?: { providerID?: string; id?: string } } }).data
+          if (typeof d?.sessionID === "string" && d.model?.providerID && d.model.id) {
+            selectedModel.set(d.sessionID, { providerID: d.model.providerID, id: d.model.id })
+            bound(selectedModel)
+          }
         })
       )
       // Read engines that keep only their latest request when a step's

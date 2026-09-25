@@ -8,7 +8,7 @@
 // counts never disagreed — only the rate's numerator did.
 // Run with: bun test/universal.test.mjs
 import { strict as assert } from "node:assert"
-import { turnRate, universalLine, universalView, turnSteps, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
+import { turnRate, universalLine, universalView, turnSteps, lastModel, aggregateTurn, DEFAULT_DISPLAY } from "../universal.ts"
 
 let passed = 0
 function test(name, fn) {
@@ -362,6 +362,21 @@ test("a step with no first token contributes no waiting time and marks it incomp
   const partial = new Map([...marks].filter(([k]) => k !== "a2"))
   const { turn } = aggregateTurn(turnSteps(toolTurn), partial)
   assert.equal(turn.waitMs, undefined)
+})
+
+// ---- the model a turn is about to use (for priming a baseline) --------------
+test("the last model is the newest assistant's or model switch's", () => {
+  const a = (providerID) => ({ type: "assistant", model: { providerID, id: "m" } })
+  assert.deepEqual(lastModel([a("mtplx"), { type: "user" }]), { providerID: "mtplx", id: "m" })
+  assert.deepEqual(
+    lastModel([a("mtplx"), { type: "model-switched", model: { providerID: "vllmmlx", id: "q" } }, { type: "user" }]),
+    { providerID: "vllmmlx", id: "q" }
+  )
+})
+
+test("a session with no model named yet gives none, not a guess", () => {
+  assert.equal(lastModel([{ type: "user" }]), undefined)
+  assert.equal(lastModel([]), undefined)
 })
 
 console.log(`\n${passed} passed`)

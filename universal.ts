@@ -125,6 +125,22 @@ export function turnSteps(
 }
 
 /**
+ * The model a session last used or selected, newest first: an assistant
+ * message's model, or a `model-switched` entry. Undefined for a session with
+ * neither, e.g. a new one on the default model.
+ */
+export function lastModel(
+  msgs: readonly ({ type?: string; model?: { providerID?: string; id?: string } } | undefined)[]
+): { providerID: string; id: string } | undefined {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (!m || (m.type !== "assistant" && m.type !== "model-switched")) continue
+    if (m.model?.providerID && m.model.id) return { providerID: m.model.providerID, id: m.model.id }
+  }
+  return undefined
+}
+
+/**
  * One turn's figures from its steps, shaped like a single message so the
  * universal line and `turnRate` need no second code path.
  *
