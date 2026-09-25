@@ -1,3 +1,11 @@
+## [Unreleased]
+### Fixed
+- Generation speed counts the time a model spends writing a tool call's
+  arguments. Those tokens were counted but their streaming time was not, so
+  a step that wrote a file showed several times its real speed (3,672 tokens
+  "at 162.9 tok/s" against the engine's 36.4), and the Session average was
+  inflated with it. Affects OpenCode's figures, not an engine's own.
+
 ## [0.3.2] – 2026-09-25
 ### Fixed
 - A reply is recorded when it ends, not when OpenCode's execution does. A

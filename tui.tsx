@@ -1105,6 +1105,12 @@ export default Plugin.define({
       )
       off.push(ctx.data.on("session.text.delta", mark))
       off.push(ctx.data.on("session.reasoning.delta", mark))
+      // A tool call's arguments are generated tokens too, streamed as their
+      // own deltas and counted in the step's output. Unwatched, a step that
+      // wrote a file had its tokens divided by only its text's streaming time
+      // (measured: 3,672 tokens "at 162.9 tok/s" on a `write` step, against
+      // the engine's 36.4 for the turn), inflating the session's speed.
+      off.push(ctx.data.on("session.tool.input.delta", mark))
 
       // Diagnostics only (OPENCODE_HUD_DEBUG): the per-step events, to design
       // reading the engine once per step instead of once per turn. On
