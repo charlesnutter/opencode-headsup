@@ -1094,7 +1094,17 @@ export default Plugin.define({
       off.push(
         ctx.data.on("session.step.streamed", (evt) => {
           const id = stepID(evt)
-          if (id) readStep(id, "step.streamed")
+          if (!id) return
+          if (HUD_DEBUG) {
+            const t = turns.get(id)
+            const now = Date.now()
+            dbg(
+              `  stream window ${id}: ${t?.firstAt !== undefined && t.lastAt !== undefined ? ((t.lastAt - t.firstAt) / 1000).toFixed(2) : "?"}s; ` +
+                `last mark ${t?.lastAt !== undefined ? now - t.lastAt : "?"}ms before step.streamed; tool deltas ${toolDeltas.get(id) ?? 0}`
+            )
+            toolDeltas.delete(id)
+          }
+          readStep(id, "step.streamed")
         })
       )
       off.push(
@@ -1105,12 +1115,24 @@ export default Plugin.define({
       )
       off.push(ctx.data.on("session.text.delta", mark))
       off.push(ctx.data.on("session.reasoning.delta", mark))
-      // A tool call's arguments are generated tokens too, streamed as their
-      // own deltas and counted in the step's output. Unwatched, a step that
-      // wrote a file had its tokens divided by only its text's streaming time
-      // (measured: 3,672 tokens "at 162.9 tok/s" on a `write` step, against
-      // the engine's 36.4 for the turn), inflating the session's speed.
-      off.push(ctx.data.on("session.tool.input.delta", mark))
+      // A tool call's arguments are generated tokens too, counted in the
+      // step's output. Unwatched, a step that wrote a file had its tokens
+      // divided by only its text's streaming time (measured: 3,672 tokens "at
+      // 162.9 tok/s" on a `write` step, against the engine's 36.4 for the
+      // turn), inflating the session's speed. Watching the argument deltas
+      // alone still left the session at 37.7 against the engine's 32.4, so
+      // the start and end of the arguments are marks too; whether the deltas
+      // reach a plugin at all is logged below.
+      const toolDeltas = new Map<string, number>()
+      off.push(
+        ctx.data.on("session.tool.input.delta", (evt) => {
+          mark(evt)
+          const id = stepID(evt)
+          if (id) toolDeltas.set(id, (toolDeltas.get(id) ?? 0) + 1)
+        })
+      )
+      off.push(ctx.data.on("session.tool.input.started", mark))
+      off.push(ctx.data.on("session.tool.input.ended", mark))
 
       // Diagnostics only (OPENCODE_HUD_DEBUG): the per-step events, to design
       // reading the engine once per step instead of once per turn. On
