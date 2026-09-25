@@ -958,6 +958,18 @@ export default Plugin.define({
     // a turn in one tab suppress another tab's line (see panels.ts).
     const latest = new LatestPerKey()
 
+    // Compactions per session, epoch ms: OpenCode summarising the conversation
+    // to fit the context, as a request of its own to the same engine. Kept to
+    // name them in a turn's time and as the reason a counter window held more
+    // than the turn (measured: a Splash turn with a sub-agent declined as
+    // "overlapping requests"; the transcript showed a compaction in it).
+    const compactions = new Map<string, Array<[number, number | undefined]>>()
+    const compactionsIn = (sessionID: string, from: number, to: number): Array<readonly [number, number]> =>
+      (compactions.get(sessionID) ?? [])
+        .map(([a, b]) => [a, b ?? to] as const)
+        .filter(([a, b]) => b > from && a < to)
+        .map(([a, b]) => [Math.max(a, from), Math.min(b, to)] as const)
+
     // Replies already reported, by their last step's id. A reply is reported
     // when its last step ends, and again asked for when the execution ends;
     // it must render once.
@@ -1003,6 +1015,10 @@ export default Plugin.define({
       const turn = agg.turn
       if (!info) return
       dbg(`report: ${sessionID} ending ${lastID}${opts.outcome ? ` (${opts.outcome})` : ""}; ${steps.length} step(s)`)
+      const turnCompactions = compactionsIn(sessionID, info.time.created, Date.now())
+      if (turnCompactions.length > 0) {
+        dbg(`  compaction during turn: ${turnCompactions.map(([a, b]) => `${((b - a) / 1000).toFixed(2)}s`).join(", ")}`)
+      }
       dbg(
         `turn: ${steps.length} assistant message(s) [${steps
           .map((m) => `${(m.tokens?.output ?? 0) + (m.tokens?.reasoning ?? 0)}${m.finish ? `/${m.finish}` : ""}`)
@@ -1106,15 +1122,16 @@ export default Plugin.define({
         // above are measured and complete; only their SOURCE changes once a
         // baseline exists, and the rate in particular can move an order of
         // magnitude when it does. Split to fit the box's 32 cells.
-        if (opts.outcome) {
+        if (!opts.outcome && tier2.sharedWindow && turnCompactions.length > 0) {
+          line.notes.push("engine data skipped:", "compaction ran this turn")
+        } else if (opts.outcome) {
           // OpenCode records no tokens for a step it stopped mid-stream
           // (measured: an interrupted reply's step came back 0/error after 7s
           // of thinking), so a 0 here is unknown, not none.
           const out0 = (info.tokens?.output ?? 0) + (info.tokens?.reasoning ?? 0)
           if (out0 === 0) line.rows = line.rows.filter(([label]) => label !== "tokens" && label !== "speed")
           line.notes.push(opts.outcome)
-        }
-        else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
+        } else if (tier2.pendingBaseline) line.notes.push("engine telemetry", "from the next turn")
         else if (tier2.sharedWindow) line.notes.push("engine data skipped:", "overlapping requests")
       }
 
@@ -1134,6 +1151,7 @@ export default Plugin.define({
           engineRows: enriched ? [...(line.detail ?? line.rows)] : [],
           engineNote: enriched ? undefined : [...line.notes],
           stepEngine: enriched ? tier2.stepEngine : undefined,
+          compactions: turnCompactions,
           subagents,
         })
         dbg(
@@ -1449,6 +1467,31 @@ export default Plugin.define({
           }, 50)
         })
       )
+      // Compactions: when each started and ended, per session.
+      const compactionEvent =
+        (end: boolean) =>
+        (evt: unknown): void => {
+          const sid = (evt as { data?: { sessionID?: string } }).data?.sessionID
+          if (typeof sid !== "string") return
+          const list = compactions.get(sid) ?? []
+          if (end) {
+            const open = list.find(([, b]) => b === undefined)
+            if (open) open[1] = Date.now()
+          } else {
+            list.push([Date.now(), undefined])
+            // A session compacts rarely; the last few are all a turn can need.
+            while (list.length > 8) list.shift()
+          }
+          compactions.set(sid, list)
+          if (compactions.size > 64) {
+            const oldest = compactions.keys().next().value
+            if (oldest !== undefined && oldest !== sid) compactions.delete(oldest)
+          }
+          dbg(`event compaction.${end ? "ended" : "started"} ${sid}`)
+        }
+      off.push(ctx.data.on("session.compaction.started", compactionEvent(false)))
+      off.push(ctx.data.on("session.compaction.ended", compactionEvent(true)))
+      off.push(ctx.data.on("session.compaction.failed", compactionEvent(true)))
       // An execution stopped before its reply finished still used the engine;
       // the reply is shown, marked, rather than leaving the previous turn up.
       off.push(

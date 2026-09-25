@@ -47,6 +47,8 @@ export interface StepDetail {
   retries: number
   /** The last retry's reason, as OpenCode recorded it. */
   retryReason?: string
+  /** Seconds of this step's wait for its first token spent on compaction. */
+  compactionS?: number
   error?: string
 }
 
@@ -55,6 +57,8 @@ export interface TimeSplit {
   generating: number
   tools: number
   subagents: number
+  /** OpenCode summarising the conversation to fit the context. */
+  compaction: number
   other: number
 }
 
@@ -84,6 +88,8 @@ export interface TurnDetail {
   stepEngine?: Array<{ decodeTokS?: number; prefillTokS?: number; ttftS?: number } | undefined>
   /** Why engine figures are missing, when they are. */
   engineNote?: string[]
+  /** Compactions that ran during the turn, epoch ms. */
+  compactions?: Array<readonly [number, number]>
   subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
 }
 
@@ -158,13 +164,14 @@ export function buildTurnDetail(
     engineNote?: string[]
     stepEngine?: TurnDetail["stepEngine"]
     subagents?: TurnDetail["subagents"]
+    compactions?: Array<readonly [number, number]>
   }
 ): TurnDetail {
   const tokens = { output: 0, reasoning: 0, input: 0, cacheRead: 0, cacheWrite: 0 }
   let cost = 0
   let sawCost = false
-  let waitMs = 0
-  let streamMs = 0
+  const waitSpans: Array<[number, number]> = []
+  const genSpans: Array<[number, number]> = []
   const toolSpans: Array<[number, number]> = []
   const subSpans: Array<[number, number]> = []
   const out: StepDetail[] = []
@@ -186,11 +193,17 @@ export function buildTurnDetail(
     }
     if (t?.firstAt !== undefined && t.firstAt > m.time.created) {
       s.ttftS = (t.firstAt - m.time.created) / 1000
-      waitMs += t.firstAt - m.time.created
+      waitSpans.push([m.time.created, t.firstAt])
     }
     if (t?.firstAt !== undefined && t.lastAt !== undefined && t.lastAt > t.firstAt) {
       s.streamS = (t.lastAt - t.firstAt) / 1000
-      streamMs += t.lastAt - t.firstAt
+      genSpans.push([t.firstAt, t.lastAt])
+    }
+    if (s.ttftS !== undefined && base.compactions && base.compactions.length > 0) {
+      const w: [number, number] = [m.time.created, m.time.created + s.ttftS * 1000]
+      const c = base.compactions.map(([a, b]) => [Math.max(a, w[0]), Math.min(b, w[1])] as [number, number])
+      const overlap = unionSeconds(c)
+      if (overlap > 0) s.compactionS = overlap
     }
     for (const tool of s.tools) {
       if (tool.start === undefined || tool.end === undefined) continue
@@ -210,20 +223,26 @@ export function buildTurnDetail(
 
   let time: TimeSplit | undefined
   if (base.totalS !== undefined && base.totalS > 0) {
-    const waiting = waitMs / 1000
-    const generating = streamMs / 1000
-    // A sub-agent's time is its tool call's; without one (a sub-agent the
-    // steps don't show), the roll-up's span stands in.
-    const subagents = subSpans.length > 0 ? unionSeconds(subSpans) : (base.subagents?.spanS ?? 0)
-    // Tool time while a sub-agent was also running is already in the
-    // sub-agent's time; counted in both, the parts would exceed the total.
-    const tools = unionSeconds([...toolSpans, ...subSpans]) - unionSeconds(subSpans)
+    // Each moment counts once, under the first of these that covers it:
+    // compaction, sub-agents, tools, generating, waiting. Overlaps are real
+    // -- a tool beside a running sub-agent, a step waiting while OpenCode
+    // compacts -- and counted twice, the parts would exceed the total.
+    const comp = (base.compactions ?? []).map(([a, b]) => [a, b] as [number, number])
+    const layers = [comp, subSpans, toolSpans, genSpans, waitSpans]
+    const parts = layers.map((spans, i) => {
+      const higher = layers.slice(0, i).flat()
+      return unionSeconds([...spans, ...higher]) - unionSeconds(higher)
+    })
+    const [compaction, subFromTools, tools, generating, waiting] = parts as [number, number, number, number, number]
+    // A sub-agent the steps don't show as a tool call: its roll-up's span.
+    const subagents = subSpans.length > 0 ? subFromTools : (base.subagents?.spanS ?? 0)
     time = {
       waiting,
       generating,
       tools,
       subagents,
-      other: Math.max(0, base.totalS - waiting - generating - tools - subagents),
+      compaction,
+      other: Math.max(0, base.totalS - waiting - generating - tools - subagents - compaction),
     }
   }
 
@@ -253,6 +272,7 @@ export function buildTurnDetail(
     engineRows: base.engineRows ?? [],
     engineNote: base.engineNote,
     stepEngine: base.stepEngine,
+    compactions: base.compactions && base.compactions.length > 0 ? base.compactions : undefined,
     subagents: base.subagents,
   }
 }
@@ -317,6 +337,7 @@ export function turnSections(d: TurnDetail): Section[] {
       ["generating", d.time.generating],
       ["tools", d.time.tools],
       ["sub-agents", d.time.subagents],
+      ["compaction", d.time.compaction],
       ["other", d.time.other],
     ]
     const shown = parts.filter(([label, v]) => v > 0 || label === "waiting" || label === "generating")
@@ -343,6 +364,7 @@ export function turnSections(d: TurnDetail): Section[] {
         lines.push((j === 0 ? head : " ".repeat(head.length)) + tail)
       })
       if (s.retries > 0) lines.push(`${" ".repeat(3)}${s.retries} ${s.retries === 1 ? "retry" : "retries"}`)
+      if (s.compactionS !== undefined && s.compactionS > 0) lines.push(`${" ".repeat(3)}waited on compaction ${secs(s.compactionS)}`)
     })
     out.push({ title: `Steps · ${d.steps.length}`, lines })
     // The reasons in full, wrapped: the table only has room for a count.

@@ -128,4 +128,17 @@ test("retry reasons are listed in full, wrapped to the column", () => {
   sec.lines.forEach((l) => assert.ok(l.length <= 46, l))
 })
 
+test("a compaction gets its own share, and the step it delayed says so", () => {
+  // OpenCode compacts from 17.5s to 18.4s; step c was created at 18s and
+  // waited until 18.5s for its first token, 0.4s of it on the compaction.
+  const d = buildTurnDetail(steps, marks, { ...base, compactions: [[T0 + 17_500, T0 + 18_400]] })
+  assert.ok(Math.abs(d.time.compaction - 0.9) < 1e-9, String(d.time.compaction))
+  assert.ok(Math.abs(d.time.waiting - 3.1) < 1e-9, String(d.time.waiting))
+  const sum = d.time.waiting + d.time.generating + d.time.tools + d.time.subagents + d.time.compaction + d.time.other
+  assert.ok(Math.abs(sum - 20) < 1e-9, String(sum))
+  assert.ok(Math.abs(d.steps[2].compactionS - 0.4) < 1e-9, String(d.steps[2].compactionS))
+  const lines = turnSections(d).find((s) => s.title.startsWith("Steps")).lines
+  assert.ok(lines.some((l) => l.includes("waited on compaction 0.40s")), lines.join("\n"))
+})
+
 console.log(`\n${passed} passed`)
