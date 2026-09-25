@@ -304,13 +304,12 @@ export default Plugin.define({
       )
     }
 
-    // ---- the details dialog (stub) ------------------------------------------
-    // A full-detail view opened from the sidebar. This is the measuring stub:
-    // real figures come later. It checks what the types promise but 2.0.12
-    // has not shown yet -- that ui.dialog.show draws our JSX at xlarge, how
-    // wide that is, that a scrollbox inside it scrolls by wheel and by keys,
-    // and that a keymap layer inside the dialog can take tab without the
-    // prompt behind it seeing it.
+    // ---- the details dialog ---------------------------------------------------
+    // A full-detail view opened from the sidebar: the last turn (detail.ts)
+    // beside the session (session.ts). Measured on 2.0.12 before it was
+    // built: ui.dialog.show draws at xlarge, 116 cells on a 214-column
+    // terminal; a scrollbox inside scrolls by wheel and by keys; a keymap
+    // layer inside the dialog takes tab without the prompt seeing it.
     const [details, setDetails] = ctx.storage.memory<{ tab: "turn" | "session"; cols: number; rows: number }>(
       "details",
       { initial: { tab: "turn", cols: 0, rows: 0 } }
