@@ -33,9 +33,9 @@ import { universalView, turnRate, turnSteps, turnUserAt, lastModel, aggregateTur
 import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
-import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
+import { summariseSession, sessionView, sessionSections, rollupSubagents, subagentRows } from "./session"
 import { shiftBaseline, counterDelta } from "./counters"
-import { buildTurnDetail, turnSections, ENGINE_MARK, type TurnDetail, type Section } from "./detail"
+import { buildTurnDetail, turnSections, ENGINE_MARK, SUBAGENT_TOOLS, type TurnDetail, type Section } from "./detail"
 
 import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -406,7 +406,7 @@ export default Plugin.define({
           const turnTitle = `Last turn · ${detail?.engine ?? turnView.engine}${detail?.outcome ? ` · ${detail.outcome}` : ""}`
           const turnCol = (): Section[] =>
             detail ? turnSections(detail) : [{ title: "No turn yet in this run", lines: ["Details start with the next turn."] }]
-          const sessCol = (): Section[] => [{ title: "Summary", rows: sessView.rows, lines: sessView.notes }]
+          const sessCol = (): Section[] => sessionSections(history.turns, sessionID)
           setTimeout(() => {
             dbg(
               `details: wide ${wide()}; dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; ` +
@@ -881,6 +881,26 @@ export default Plugin.define({
       return promTarget(provider)?.label ?? known[provider] ?? provider
     }
 
+    /** Whether any adapter reads this provider's engine. */
+    function hasAdapter(provider: string): boolean {
+      return engineLabel(provider) !== provider || promTarget(provider) !== undefined || provider === "llamafile"
+    }
+
+    /** A turn's tool time and calls per tool name, sub-agents excluded. */
+    function toolsByName(d: TurnDetail): Record<string, { s: number; n: number }> | undefined {
+      const out: Record<string, { s: number; n: number }> = {}
+      for (const st of d.steps) {
+        for (const t of st.tools) {
+          if (SUBAGENT_TOOLS.has(t.name)) continue
+          const cur = out[t.name] ?? { s: 0, n: 0 }
+          cur.s += t.seconds ?? 0
+          cur.n += 1
+          out[t.name] = cur
+        }
+      }
+      return Object.keys(out).length > 0 ? out : undefined
+    }
+
     // ---- baseline priming ---------------------------------------------------
     // A counter-difference engine is read at each turn's end, and that reading
     // is the next turn's baseline -- so the first turn after launch had none
@@ -1174,8 +1194,9 @@ export default Plugin.define({
       // The turn in full, for the dialog. Built before the stream marks are
       // released below, and from the rows before sub-agent rows join them:
       // those are OpenCode's, kept in the detail's own sub-agent section.
+      let detail: TurnDetail | undefined
       try {
-        const detail = buildTurnDetail(steps, turns, {
+        detail = buildTurnDetail(steps, turns, {
           sessionID,
           provider,
           model,
@@ -1199,12 +1220,13 @@ export default Plugin.define({
           }),
           subagents,
         })
+        const dd = detail
         dbg(
-          `detail: ${detail.steps.length} step(s); tools [${detail.steps.flatMap((st) => st.tools.map((t) => `${t.name}:${t.seconds?.toFixed(2) ?? t.status}`)).join(", ")}]` +
-            (detail.time ? `; split ${Object.entries(detail.time).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")} of ${detail.totalS?.toFixed(2)}` : "")
+          `detail: ${dd.steps.length} step(s); tools [${dd.steps.flatMap((st) => st.tools.map((t) => `${t.name}:${t.seconds?.toFixed(2) ?? t.status}`)).join(", ")}]` +
+            (dd.time ? `; split ${Object.entries(dd.time).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")} of ${dd.totalS?.toFixed(2)}` : "")
         )
         setTurnDetail((d) => {
-          d.bySession[sessionID] = detail
+          d.bySession[sessionID] = dd
           const keys = Object.keys(d.bySession)
           if (keys.length > 32) {
             const oldest = keys.sort((a, b) => (d.bySession[a]?.at ?? 0) - (d.bySession[b]?.at ?? 0))[0]
@@ -1247,6 +1269,25 @@ export default Plugin.define({
         engine: enriched ? tier2.engine : undefined,
         subagents,
         outcome: opts.outcome,
+        // For the dialog's session column.
+        cacheWrite: detail?.tokens.cacheWrite || undefined,
+        toolsS: detail?.time?.tools,
+        compactionS: detail?.time?.compaction || undefined,
+        tools: detail ? toolsByName(detail) : undefined,
+        retryReasons: detail?.steps.flatMap((st) => (st.retryReason ? [st.retryReason] : [])),
+        skip: enriched
+          ? undefined
+          : opts.outcome
+            ? "unfinished"
+            : tier2.pendingBaseline
+              ? "baseline"
+              : tier2.sharedWindow
+                ? turnCompactions.length > 0
+                  ? "compaction"
+                  : "overlap"
+                : hasAdapter(provider)
+                  ? "unavailable"
+                  : "no-adapter",
       }
       setHistory((d) => {
         d.turns = record({ turns: d.turns }, rec).turns

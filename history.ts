@@ -78,6 +78,24 @@ export interface TurnRecord {
   subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
   /** Set when the reply did not finish: stopped by the user, or failed. */
   outcome?: "interrupted" | "failed"
+  // ---- for the session column of the details dialog ------------------------
+  // All optional: rows recorded before these existed leave the figures out.
+  /** Prompt tokens written to the cache this turn. */
+  cacheWrite?: number
+  /** Seconds tools ran, overlaps counted once, sub-agent time excluded. */
+  toolsS?: number
+  /** Per tool name: seconds it ran and how many calls. */
+  tools?: Record<string, { s: number; n: number }>
+  /** Seconds OpenCode spent compacting the conversation during the turn. */
+  compactionS?: number
+  /** Each retry's reason, as OpenCode recorded it (one per retried step). */
+  retryReasons?: string[]
+  /**
+   * Why the engine's figures were not used, when `source` is "host":
+   * no reading to difference from yet, a window holding other requests or a
+   * compaction, the reply not finishing, or no adapter for the provider.
+   */
+  skip?: "baseline" | "overlap" | "compaction" | "unfinished" | "no-adapter" | "unavailable"
   engine?: {
     prefillTokS?: number
     /** Tokens committed per verify pass (MTPLX's multi-token prediction). */
