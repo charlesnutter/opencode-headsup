@@ -101,4 +101,31 @@ test("the steps table lists each tool call on its own line", () => {
   assert.ok(steps_.lines.some((l) => l.includes("1 retry")), steps_.lines.join("\n"))
 })
 
+test("the engine section is marked, and says why when there are no engine figures", () => {
+  const withEngine = turnSections(buildTurnDetail(steps, marks, { ...base, engineRows: [["speed", "36.1 tok/s"]] }))
+  assert.ok(withEngine.some((s) => s.title === "◆ Engine · MTPLX"), withEngine.map((s) => s.title).join(", "))
+  const skipped = turnSections(buildTurnDetail(steps, marks, { ...base, engineNote: ["engine data skipped:", "overlapping requests"] }))
+  const e = skipped.find((s) => s.title === "Engine · MTPLX")
+  assert.deepEqual(e.lines, ["no engine figures:", "engine data skipped:", "overlapping requests"])
+})
+
+test("per-step engine rates are listed when the engine read each step", () => {
+  const d = buildTurnDetail(steps, marks, {
+    ...base,
+    engineRows: [["speed", "36.1 tok/s"]],
+    stepEngine: [{ decodeTokS: 35.2, prefillTokS: 452 }, { decodeTokS: 36.9 }, undefined],
+  })
+  const e = turnSections(d).find((s) => s.title.startsWith("◆ Engine"))
+  assert.ok(e.lines.includes("step 1  35.2 tok/s  prefill 452 tok/s"), e.lines.join("\n"))
+  assert.ok(e.lines.includes("step 2  36.9 tok/s"), e.lines.join("\n"))
+})
+
+test("retry reasons are listed in full, wrapped to the column", () => {
+  const long = "Rate limited by the provider; retrying after the backoff window elapses"
+  const retried = [steps[0], { ...steps[1], retry: { attempt: 2, at: 0, error: { type: "x", message: long } } }, steps[2]]
+  const sec = turnSections(buildTurnDetail(retried, marks, base)).find((s) => s.title === "Retries and errors")
+  assert.equal(sec.lines.join(" "), `step 2: ${long}`)
+  sec.lines.forEach((l) => assert.ok(l.length <= 46, l))
+})
+
 console.log(`\n${passed} passed`)

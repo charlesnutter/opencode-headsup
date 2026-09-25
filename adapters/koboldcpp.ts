@@ -17,7 +17,7 @@
 
 import { httpJson, type HttpOptions } from "../http"
 import { nn, ni } from "../format"
-import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
+import { rowsOf, timeRows, viewText, nt, phase, type Row, type TurnView } from "../rows"
 /**
  * The fields of /api/extra/perf this plugin reads. The endpoint returns more
  * (image/TTS/transcription counters, horde bookkeeping, seeds) that describe
@@ -252,7 +252,19 @@ export function koboldView(
     t.generationsInWindow !== undefined && t.generationsInWindow > 1
       ? [`${ni(t.generationsInWindow)} generations this turn`, "(last shown only)"]
       : []
-  return { engine: "KoboldCpp", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+  const detail: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("prefill", [t.prefillTokS !== undefined ? `${ni(t.prefillTokS)} tok/s` : "", phase(t.promptTokens, t.prefillS)]),
+    ["decode", phase(t.completionTokens, t.decodeS)],
+    ...rowsOf("draft", [t.draftAcceptRate !== undefined ? `${ni(t.draftAcceptRate * 100)}% accepted` : ""]),
+  ]
+  return {
+    engine: "KoboldCpp",
+    rows,
+    notes,
+    key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined,
+    detail,
+  }
 }
 
 /** The view as text; kept for tests that look for a figure. */

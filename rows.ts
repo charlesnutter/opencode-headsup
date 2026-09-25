@@ -17,6 +17,11 @@ export interface TurnView {
   notes: string[]
   /** The one figure a collapsed heading keeps, e.g. `34.4 tok/s`. */
   key?: string
+  /**
+   * For the details dialog: every figure the engine itself measured, and
+   * nothing of OpenCode's. Absent on a view drawn from OpenCode's figures.
+   */
+  detail?: Row[]
 }
 
 /** Width of the label column, in cells. */
@@ -60,6 +65,12 @@ export function decodeView(s: string): TurnView {
   const [engine = "", ...rest] = s.split("\n")
   return { engine, rows: [], notes: rest }
 }
+
+/** A phase's tokens and time, e.g. `7,907 tok · 17.19s`. */
+export const phase = (tokens: number | undefined, seconds: number | undefined): string =>
+  [tokens !== undefined ? `${nt(tokens)} tok` : "", seconds !== undefined && isFinite(seconds) ? `${seconds.toFixed(2)}s` : ""]
+    .filter(Boolean)
+    .join(" · ")
 
 /**
  * The turn's total -- what the user waited, from OpenCode -- and any

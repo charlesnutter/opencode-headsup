@@ -34,7 +34,7 @@ import { record, historyLines, type History, type TurnRecord } from "./history"
 import { emptyPanels, lineFor, keyFor, setLine, LatestPerKey, PLACEHOLDER, type Panels } from "./panels"
 import { encodeView, decodeView, LABEL_WIDTH, type TurnView } from "./rows"
 import { summariseSession, sessionView, rollupSubagents, subagentRows } from "./session"
-import { buildTurnDetail, turnSections, type TurnDetail, type Section } from "./detail"
+import { buildTurnDetail, turnSections, ENGINE_MARK, type TurnDetail, type Section } from "./detail"
 
 import { fetchMtplxLatest, mtplxView, combineMtplxSteps, type MtplxLatest } from "./adapters/mtplx"
 import { fetchOmlxSample, omlxView, omlxIsThisTurn, type OmlxSample } from "./adapters/omlx"
@@ -449,7 +449,7 @@ export default Plugin.define({
               </scrollbox>
               <text selectable={false}> </text>
               <text selectable={false} fg={subdued}>
-                {"wheel or ↑↓ pgup pgdn scroll  ·  esc closes"}
+                {`${ENGINE_MARK} measured by the engine; the rest is OpenCode's  ·  ↑↓ pgup pgdn  ·  esc`}
               </text>
             </box>
           )
@@ -547,6 +547,8 @@ export default Plugin.define({
         sharedWindow: boolean
         /** Engine-only figures of an accepted reading, for the history row. */
         engine?: TurnRecord["engine"]
+        /** Each step's own engine reading, where the engine is read per step. */
+        stepEngine?: TurnDetail["stepEngine"]
       },
       /** The turn's assistant messages, one per step, oldest first. */
       steps: readonly SessionMessageAssistant[],
@@ -657,6 +659,15 @@ export default Plugin.define({
             if (receipts.every((r) => r !== null)) tier2.sharedWindow = true
             return null
           }
+          tier2.stepEngine = receipts.map((r) =>
+            r
+              ? {
+                  decodeTokS: r.decode_tok_s ?? undefined,
+                  prefillTokS: r.prefill_tok_s ?? undefined,
+                  ttftS: r.ttft_s ?? undefined,
+                }
+              : undefined
+          )
           const verifies = combined.verify_calls ?? 0
           tier2.engine = {
             prefillTokS: combined.prefill_tok_s ?? undefined,
@@ -759,6 +770,9 @@ export default Plugin.define({
               return null
             }
             tier2.engine = { prefillTokS: combined.prefillTokS, draftAccept: combined.draftAcceptRate }
+            tier2.stepEngine = perfs.map((p) =>
+              p ? { decodeTokS: p.last_eval_speed || undefined, prefillTokS: p.last_process_speed || undefined } : undefined
+            )
             return koboldView(combined, hostTtft, hostFigures)
           }
           // No per-step reads: one read now, which can only describe the
@@ -1055,7 +1069,12 @@ export default Plugin.define({
         dbg(`sub-agent lookup threw: ${String(e)}`)
       }
 
-      const tier2: { pendingBaseline: boolean; sharedWindow: boolean; engine?: TurnRecord["engine"] } = {
+      const tier2: {
+        pendingBaseline: boolean
+        sharedWindow: boolean
+        engine?: TurnRecord["engine"]
+        stepEngine?: TurnDetail["stepEngine"]
+      } = {
         pendingBaseline: false,
         sharedWindow: false,
       }
@@ -1112,8 +1131,9 @@ export default Plugin.define({
           totalS: turnRate(0, info, turn).total,
           outcome: opts.outcome,
           contextLimit: contextLimitFor(provider, model),
-          engineRows: enriched ? [...line.rows] : [],
+          engineRows: enriched ? [...(line.detail ?? line.rows)] : [],
           engineNote: enriched ? undefined : [...line.notes],
+          stepEngine: enriched ? tier2.stepEngine : undefined,
           subagents,
         })
         dbg(

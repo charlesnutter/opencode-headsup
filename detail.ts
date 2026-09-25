@@ -75,8 +75,13 @@ export interface TurnDetail {
   /** Context in use after the turn: the last step's prompt plus its output. */
   context?: { used: number; limit?: number }
   cost?: number
-  /** Figures measured by the engine, as the adapter rendered them. */
+  /** Figures measured by the engine, and only those. */
   engineRows: Row[]
+  /**
+   * Per step, the engine's own reading, where the engine is read once per
+   * step (MTPLX, KoboldCpp). Index-aligned with `steps`.
+   */
+  stepEngine?: Array<{ decodeTokS?: number; prefillTokS?: number; ttftS?: number } | undefined>
   /** Why engine figures are missing, when they are. */
   engineNote?: string[]
   subagents?: { count: number; tokens: number; spanS: number; cost?: number; steps?: number }
@@ -151,6 +156,7 @@ export function buildTurnDetail(
     contextLimit?: number
     engineRows?: Row[]
     engineNote?: string[]
+    stepEngine?: TurnDetail["stepEngine"]
     subagents?: TurnDetail["subagents"]
   }
 ): TurnDetail {
@@ -246,11 +252,32 @@ export function buildTurnDetail(
     cost: sawCost && cost > 0 ? cost : undefined,
     engineRows: base.engineRows ?? [],
     engineNote: base.engineNote,
+    stepEngine: base.stepEngine,
     subagents: base.subagents,
   }
 }
 
 // ---- as text, for the dialog -------------------------------------------------
+
+/** Marks what the engine measured, as against OpenCode's figures. */
+export const ENGINE_MARK = "◆"
+
+/** Words onto lines of at most `width` cells; a longer word is cut. */
+export function wrap(text: string, width: number): string[] {
+  const out: string[] = []
+  let line = ""
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const w = word.length > width ? word.slice(0, width) : word
+    if (line && line.length + 1 + w.length > width) {
+      out.push(line)
+      line = w
+    } else {
+      line = line ? `${line} ${w}` : w
+    }
+  }
+  if (line) out.push(line)
+  return out
+}
 
 /** A titled block of the dialog: labelled rows, or preformatted lines. */
 export interface Section {
@@ -315,9 +342,14 @@ export function turnSections(d: TurnDetail): Section[] {
             : ""
         lines.push((j === 0 ? head : " ".repeat(head.length)) + tail)
       })
-      if (s.retries > 0) lines.push(`${" ".repeat(3)}${s.retries} ${s.retries === 1 ? "retry" : "retries"}${s.retryReason ? `: ${s.retryReason}` : ""}`.slice(0, 46))
+      if (s.retries > 0) lines.push(`${" ".repeat(3)}${s.retries} ${s.retries === 1 ? "retry" : "retries"}`)
     })
     out.push({ title: `Steps · ${d.steps.length}`, lines })
+    // The reasons in full, wrapped: the table only has room for a count.
+    const reasons = d.steps.flatMap((s, i) =>
+      [s.retryReason ? `step ${i + 1}: ${s.retryReason}` : "", s.error ? `step ${i + 1} failed: ${s.error}` : ""].filter(Boolean)
+    )
+    if (reasons.length > 0) out.push({ title: "Retries and errors", lines: reasons.flatMap((r) => wrap(r, 46)) })
   }
   const t = d.tokens
   const rows: Row[] = [
@@ -337,8 +369,26 @@ export function turnSections(d: TurnDetail): Section[] {
   }
   if (d.cost !== undefined) rows.push(["cost", `$${d.cost.toFixed(4)}`])
   out.push({ title: "Tokens", rows })
-  if (d.engineRows.length > 0 || d.engineNote) {
-    out.push({ title: `Engine · ${d.engine}`, rows: d.engineRows, lines: d.engineNote })
+  if (d.engineRows.length > 0) {
+    const perStep = (d.stepEngine ?? []).flatMap((e, i) =>
+      e && (e.decodeTokS !== undefined || e.prefillTokS !== undefined)
+        ? [
+            `step ${String(i + 1).padEnd(2)} ${e.decodeTokS !== undefined ? `${e.decodeTokS.toFixed(1)} tok/s` : ""}${
+              e.prefillTokS !== undefined ? `  prefill ${Math.round(e.prefillTokS)} tok/s` : ""
+            }`,
+          ]
+        : []
+    )
+    out.push({
+      title: `${ENGINE_MARK} Engine · ${d.engine}`,
+      rows: d.engineRows,
+      lines: perStep.length > 1 ? ["", "per step", ...perStep] : undefined,
+    })
+  } else {
+    out.push({
+      title: `Engine · ${d.engine}`,
+      lines: d.engineNote && d.engineNote.length > 0 ? ["no engine figures:", ...d.engineNote] : ["no engine figures for this turn"],
+    })
   }
   if (d.subagents) {
     out.push({

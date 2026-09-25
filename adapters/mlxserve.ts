@@ -23,7 +23,7 @@
 
 import { httpJson, type HttpOptions } from "../http"
 import { nn, ni } from "../format"
-import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
+import { rowsOf, timeRows, viewText, nt, phase, type Row, type TurnView } from "../rows"
 
 /** One record from /v1/metrics/requests, as the server names its fields. */
 export interface MlxServeRequest {
@@ -295,7 +295,21 @@ export function mlxServeView(
   // as a tenfold slowdown rather than a one-off load.
   if (t.coldStart) notes.push("cold start (model loaded)")
   if (t.requests > 1 && t.steps === undefined) notes.push(`${ni(t.requests)} requests this turn`)
-  return { engine: "mlx-serve", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+  const detail: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("ttft", [t.decodeTokS !== undefined && t.ttft !== undefined ? `${nn(t.ttft, 2)}s` : ""]),
+    ["tokens", nt(t.completionTokens)],
+    ...rowsOf("prompt", [t.promptTokens !== undefined ? `${nt(t.promptTokens)} tok` : ""]),
+    ["request", `${nn(t.totalS, 2)}s`],
+    ...rowsOf("requests", [t.requests > 1 ? nt(t.requests) : ""]),
+  ]
+  return {
+    engine: "mlx-serve",
+    rows,
+    notes,
+    key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined,
+    detail,
+  }
 }
 
 /** The view as text; kept for tests that look for a figure. */

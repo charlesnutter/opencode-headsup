@@ -18,7 +18,7 @@
 import { sumLabeledMetric } from "../prometheus-text"
 import { httpText, type HttpOptions } from "../http"
 import { nn, ni } from "../format"
-import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "../rows"
+import { rowsOf, timeRows, viewText, nt, phase, type Row, type TurnView } from "../rows"
 
 /**
  * Names verified against the server's own metrics.py (Splash 1.0), which maps
@@ -219,7 +219,15 @@ export function splashView(
   // Only when a turn spanned several requests nobody accounted for, so the
   // figures above read as sums rather than as one reply.
   const notes = t.requests > 1 && host.steps === undefined ? [`${ni(t.requests)} requests this turn`] : []
-  return { engine: "Splash", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined }
+  const detail: Row[] = [
+    ...rowsOf("speed", [t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : ""]),
+    ...rowsOf("prefill", [t.prefillTokS !== undefined ? `${ni(t.prefillTokS)} tok/s` : "", phase(t.promptTokens, t.prefillS)]),
+    ["decode", phase(t.completionTokens, t.decodeS)],
+    ...rowsOf("cached", [t.cachedTokens > 0 ? `${nt(t.cachedTokens)} tok reused` : ""]),
+    ...rowsOf("draft", [t.draftAcceptRate !== undefined ? `${ni(t.draftAcceptRate * 100)}% accepted` : ""]),
+    ["requests", nt(t.requests)],
+  ]
+  return { engine: "Splash", rows, notes, key: t.decodeTokS !== undefined ? `${nn(t.decodeTokS)} tok/s` : undefined, detail }
 }
 
 /** The view as text; kept for tests that look for a figure. */
