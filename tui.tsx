@@ -324,9 +324,9 @@ export default Plugin.define({
     // built: ui.dialog.show draws at xlarge, 116 cells on a 214-column
     // terminal; a scrollbox inside scrolls by wheel and by keys; a keymap
     // layer inside the dialog takes tab without the prompt seeing it.
-    const [details, setDetails] = ctx.storage.memory<{ tab: Tab; scope: Scope; cols: number; rows: number }>(
+    const [details, setDetails] = ctx.storage.memory<{ tab: Tab; scope: Scope; cols: number; rows: number; w: number }>(
       "details",
-      { initial: { tab: "turn", scope: "session", cols: 0, rows: 0 } }
+      { initial: { tab: "turn", scope: "session", cols: 0, rows: 0, w: CONTENT_WIDTH } }
     )
     // The dialog's colours, from the theme's hue scales (measured on 2.0.12:
     // hue.{gray,blue,cyan,purple,orange,red}.{100..900}), each with a fallback.
@@ -347,7 +347,8 @@ export default Plugin.define({
         case "engine":
           return themeColor("hue.orange.400", "hue.yellow.500") as Color | undefined
         case "rule":
-          return themeColor("hue.gray.700", "border.base") as Color | undefined
+          // hue.gray.700 was invisible on the dialog's background (measured).
+          return themeColor("border.base", "hue.gray.500") as Color | undefined
         default:
           return undefined
       }
@@ -411,9 +412,9 @@ export default Plugin.define({
           // The current tab's lines, reactive on the tab, the scope and the
           // stored turn and history.
           const lines = (): Line[] => {
-            if (details.tab === "turn") return turnLines(sessionID ? turnDetail.bySession[sessionID] : undefined)
-            if (details.tab === "session") return sessionLines(sessionFigures(history.turns, sessionID))
-            return historyTabLines(history.turns, sessionID, details.scope)
+            if (details.tab === "turn") return turnLines(sessionID ? turnDetail.bySession[sessionID] : undefined, details.w)
+            if (details.tab === "session") return sessionLines(sessionFigures(history.turns, sessionID), details.w)
+            return historyTabLines(history.turns, sessionID, details.scope, details.w)
           }
           const note = (): string => {
             if (details.tab === "turn") {
@@ -465,12 +466,27 @@ export default Plugin.define({
               { title: "Page up", bind: "pageup", run: () => scroll?.scrollBy?.(-bodyRows()) },
             ],
           }))
-          setTimeout(() => {
-            // `large` first; if it is narrower than the content needs, `xlarge`.
-            const need = CONTENT_WIDTH + 4
-            if (root?.width !== undefined && root.width < need) ctx.ui.dialog.set({ size: "xlarge", centered: true })
-            dbg(`details: dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; body ${scroll?.width ?? "?"}x${scroll?.height ?? "?"}; ${lines().length} lines`)
-          }, 200)
+          // The content takes the dialog's measured width, less its padding:
+          // `large` measured 88 cells on a 241-column terminal, and a fixed
+          // 72-cell layout left an empty strip on the right. Narrower than
+          // the layout needs, the dialog goes to `xlarge` and is measured again.
+          const fit = (tries: number): void => {
+            setTimeout(() => {
+              const inner = root?.width !== undefined ? root.width - 4 : undefined
+              if (inner !== undefined && inner < CONTENT_WIDTH && tries > 0) {
+                ctx.ui.dialog.set({ size: "xlarge", centered: true })
+                fit(tries - 1)
+                return
+              }
+              if (inner !== undefined) {
+                setDetails((d) => {
+                  d.w = Math.max(CONTENT_WIDTH, Math.min(110, inner))
+                })
+              }
+              dbg(`details: dialog ${root?.width ?? "?"}x${root?.height ?? "?"}; content ${details.w} wide; ${lines().length} lines`)
+            }, 60)
+          }
+          fit(1)
           return (
             <box
               flexDirection="column"
@@ -478,7 +494,7 @@ export default Plugin.define({
               paddingRight={2}
               ref={(r: unknown) => (root = r as typeof root)}
             >
-              {drawLine(tabsLine(details.tab, note()))}
+              {drawLine(tabsLine(details.tab, note(), details.w))}
               <text selectable={false}> </text>
               <scrollbox
                 ref={(r: unknown) => {
@@ -491,7 +507,7 @@ export default Plugin.define({
                 <box flexDirection="column">{lines().map((l) => drawLine(l))}</box>
               </scrollbox>
               <text selectable={false}> </text>
-              {drawLine(footLine(details.tab))}
+              {drawLine(footLine(details.tab, details.w))}
             </box>
           )
         },
