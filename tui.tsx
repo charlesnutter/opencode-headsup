@@ -663,6 +663,26 @@ export default Plugin.define({
       }
     }
 
+    /**
+     * An engine's name as its own view heads it, so a turn that falls back to
+     * OpenCode's figures keeps the same heading (`vllm-mlx`, not `vllmmlx`).
+     * Providers with no adapter keep their id.
+     */
+    function engineLabel(provider: string): string {
+      const known: Record<string, string> = {
+        mtplx: "MTPLX",
+        omlx: "oMLX",
+        llamacpp: "llama.cpp",
+        llamafile: "llamafile",
+        splash: "Splash",
+        koboldcpp: "KoboldCpp",
+        kobold: "KoboldCpp",
+        mlxserve: "mlx-serve",
+        "mlx-serve": "mlx-serve",
+      }
+      return promTarget(provider)?.label ?? known[provider] ?? provider
+    }
+
     // ---- baseline priming ---------------------------------------------------
     // A counter-difference engine is read at each turn's end, and that reading
     // is the next turn's baseline -- so the first turn after launch had none
@@ -796,7 +816,7 @@ export default Plugin.define({
         // A model or provider switch replaces this session's line rather than
         // blending two engines' figures into one reading. Per session, so a
         // different model in another tab is not a switch here.
-        show(encodeView({ engine: provider, rows: [], notes: ["…"] }), sessionID, key)
+        show(encodeView({ engine: engineLabel(provider), rows: [], notes: ["…"] }), sessionID, key)
       }
 
       // One signal for every fetch this turn. Each request still gets its own
@@ -854,7 +874,7 @@ export default Plugin.define({
       const enriched = line !== null
       if (!line) {
         line = universalView(
-          provider,
+          engineLabel(provider),
           info,
           turn,
           cfg.display,

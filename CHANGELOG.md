@@ -7,6 +7,8 @@
   yet, that one engine is read once. Nothing is read at startup, and no
   other engine is read. A new session that has not used or selected a
   model yet is not primed, as before.
+- A turn shown with OpenCode's own figures is headed by the engine's name,
+  as its engine figures are (`vllm-mlx`, not `vllmmlx`).
 
 ## [0.3.0] – 2026-09-23
 ### Added
