@@ -2,9 +2,14 @@
 ### Changed
 - The details dialog is one column with three tabs -- Turn, Session and
   History -- switched with `tab`, instead of two side-by-side columns. It is
-  as tall as its content (up to most of the screen) rather than always
-  near full height, a fixed 72 cells wide with even padding, and uses
-  section rules, bars for shares, and bold values beside dim labels.
+  as tall as its content (up to most of the screen), fills the width of an
+  `xlarge` dialog, and sits on a lighter panel inside a darker ring. Each
+  section has a title and rule with a blank row under it; shares are drawn
+  as square bars; and figures within a section sit on shared columns
+  (Tokens' values, qualifiers and bars; the engine's figures in a
+  three-column grid).
+- Tools by time on the Session tab always shows: the tools used, that none
+  were, or that tool use was not recorded for older turns.
 - The Turn tab adds a timeline: each step's wait, generation and tools on
   one time scale. Its steps table shows the engine's own per-step rate
   beside OpenCode's where the engine is read per step.

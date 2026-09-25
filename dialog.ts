@@ -169,7 +169,7 @@ function legendColumns(t: Split): Line[] {
   const rw = Math.max(7, ...right.map((k) => NAME[k].length))
   const cell = (k: (typeof KEYS)[number], i: number, nameW: number, valW: number): Line => [
     [GLYPH[k], STYLE[k]],
-    [` ${NAME[k].padEnd(nameW)}`, "dim"],
+    [` ${NAME[k].padEnd(nameW)} `, "dim"],
     [`${dur(t[k]).padStart(valW)}`, "bold"],
     [(pct[i] === 0 && t[k] > 0 ? "<1%" : `${pct[i]}%`).padStart(4), "dim"],
   ]
