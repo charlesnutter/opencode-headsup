@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.3.3] – 2026-09-25
 ### Fixed
 - Generation speed counts the time a model spends writing a tool call's
   arguments. Those tokens were counted but their streaming time was not, so
