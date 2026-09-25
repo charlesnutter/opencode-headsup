@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.3.2] – 2026-09-25
 ### Fixed
 - A reply is recorded when it ends, not when OpenCode's execution does. A
   message sent while a reply is running is queued into the same execution,
