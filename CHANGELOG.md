@@ -1,3 +1,11 @@
+## [Unreleased]
+### Fixed
+- Loads on OpenCode 2.2: runtime imports moved to `@opencode/plugin` and
+  `@opencode/client`.
+- Theme lookup ignores nested palette objects such as `text.action.primary`,
+  so a theme without a usable accent no longer passes a non-colour to the
+  renderer.
+
 ## [0.5.0] – 2026-09-25
 ### Changed
 - The details dialog is one column with three tabs -- Turn, Session and

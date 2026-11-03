@@ -23,8 +23,8 @@
 // does that. Dividing only visible output by a window that also covered
 // thinking is the v1 bug this comment exists to stop recurring.
 
-import { Plugin } from "@opencode-ai/plugin/tui"
-import type { SessionMessageAssistant } from "@opencode-ai/client"
+import { Plugin } from "@opencode/plugin/tui"
+import type { SessionMessageAssistant } from "@opencode/client"
 import { appendFileSync } from "node:fs"
 
 import { short } from "./format"
@@ -244,12 +244,17 @@ export default Plugin.define({
     // was undefined and reading `.surface.offset` crashed the slot. Other
     // plugins use at least three shapes (text.subdued; text.muted/text.base;
     // textMuted; background.raised.base), so each known path is tried and a
-    // missing colour means "no colour", never a throw.
+    // missing colour means "no colour", never a throw. A path can also land on
+    // a nested palette (text.action.primary on 2.2.x), which is not a colour.
+    const colorLike = (v: unknown): boolean =>
+      typeof v === "string" ||
+      typeof v === "number" ||
+      (typeof v === "object" && v !== null && ("buffer" in v || typeof (v as { toInts?: unknown }).toInts === "function"))
     const themeColor = (...paths: string[]): unknown => {
       for (const path of paths) {
         let v: unknown = ctx.theme
         for (const k of path.split(".")) v = v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined
-        if (v !== undefined && v !== null && typeof v !== "function") return v
+        if (v !== undefined && v !== null && typeof v !== "function" && colorLike(v)) return v
       }
       return undefined
     }

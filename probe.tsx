@@ -9,7 +9,7 @@
 //   { "plugins": [{ "package": "/Users/you/dev/opencode-headsup" }] }
 // Then read /tmp/headsup-probe.log
 
-import { Plugin } from "@opencode-ai/plugin/tui"
+import { Plugin } from "@opencode/plugin/tui"
 import { appendFileSync } from "node:fs"
 
 const LOG = "/tmp/headsup-probe.log"
@@ -153,9 +153,9 @@ export default Plugin.define({
         })
       )
       off.push(
-        ctx.data.on("session.message.content.updated", (evt) => {
+        ctx.data.on("session.text.delta", (evt) => {
           // Log only the shape, not the content — this fires constantly.
-          log("P2.content.updated.keys", Object.keys((evt ?? {}) as object))
+          log("P2.text.delta.keys", Object.keys((evt ?? {}) as object))
         })
       )
       // `session.idle` was subscribed first and never fired once across four
