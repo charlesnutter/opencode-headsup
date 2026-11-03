@@ -12,7 +12,7 @@ import { nn, ni, money } from "./format"
 import { rowsOf, timeRows, viewText, nt, type Row, type TurnView } from "./rows"
 
 // ---- Tier 1: universal, from OpenCode's own per-turn events -----------------
-import type { SessionMessageAssistant } from "@opencode-ai/client"
+import type { SessionMessageAssistant } from "@opencode/client"
 
 export interface Turn {
   startAt?: number // request start (message.time.created), for TTFT

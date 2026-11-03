@@ -14,7 +14,7 @@
 // Everything here is OpenCode's own data. Engine figures travel separately,
 // as rows the adapter produced, so each can be marked with its source.
 
-import type { SessionMessageAssistant } from "@opencode-ai/client"
+import type { SessionMessageAssistant } from "@opencode/client"
 import type { Turn } from "./universal"
 import type { Row } from "./rows"
 
